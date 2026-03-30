@@ -28,9 +28,10 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: mybook-backend
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/mybook
-      LLM_PROVIDER: mock
       APP_ENV: development
       LOG_LEVEL: INFO
     ports:

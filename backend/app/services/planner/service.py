@@ -1,9 +1,10 @@
 """Planner Service - 规划服务"""
+import re
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import LLMProvider
-from app.llm.mock import MockLLMProvider
+from app.llm.factory import create_llm_provider
 from app.models.project import Project
 from app.models.story_bible import StoryBible
 from app.models.character import Character
@@ -32,7 +33,7 @@ class PlannerService:
 
     def __init__(self, db: AsyncSession, llm_provider: Optional[LLMProvider] = None):
         self.db = db
-        self.llm = llm_provider or MockLLMProvider()
+        self.llm = llm_provider or create_llm_provider()
         self.project_repo = ProjectRepository(db)
         self.chapter_repo = ChapterRepository(db)
 
@@ -276,18 +277,10 @@ class PlannerService:
         
         response = await self.llm.generate(prompt, system_prompt)
         
-        # TODO: 解析结构化输出并创建 Chapter 记录
-        outlines = []
-        for i in range(count):
-            outline = ChapterOutline(
-                chapter_no=next_chapter_no + i,
-                title=f"第{next_chapter_no + i}章",
-                outline=f"章节大纲内容",
-                hook=f"章节钩子",
-                key_events=[]
-            )
-            outlines.append(outline)
-            
+        # 解析 LLM 返回的大纲内容
+        outlines = self._parse_chapter_outlines(response.content, next_chapter_no, count)
+        
+        for outline in outlines:
             # 创建数据库记录
             chapter = Chapter(
                 project_id=project_id,
@@ -330,3 +323,199 @@ class PlannerService:
             hook=chapter.hook or "待填充",
             key_events=[]
         )
+
+    def _parse_chapter_outlines(
+        self,
+        content: str,
+        start_chapter_no: int,
+        count: int
+    ) -> list[ChapterOutline]:
+        """
+        解析 LLM 返回的章节大纲内容
+        
+        Args:
+            content: LLM 返回的原始文本
+            start_chapter_no: 起始章节号
+            count: 需要解析的大纲数量
+            
+        Returns:
+            list[ChapterOutline]: 解析后的大纲列表
+        """
+        outlines = []
+        
+        # 过滤掉 MiniMax 的各种思考标签
+        content = re.sub(r'<reasoning>.*?</reasoning>', '', content, flags=re.DOTALL)
+        content = re.sub(r'<reflection>.*?</reflection>', '', content, flags=re.DOTALL)
+        content = re.sub(r'<thinking>.*?</thinking>', '', content, flags=re.DOTALL)
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        # 也过滤 XML 风格的思考标签
+        content = re.sub(r'<.*?>.*?<\/.*?>', '', content, flags=re.DOTALL)
+        
+        # 尝试解析 JSON 格式
+        try:
+            import json
+            # 提取 JSON 数组
+            json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                json_str = re.sub(r',\s*\]', ']', json_str)
+                data = json.loads(json_str)
+                for i, item in enumerate(data[:count]):
+                    outline = ChapterOutline(
+                        chapter_no=start_chapter_no + i,
+                        title=item.get('title', f"第{start_chapter_no + i}章"),
+                        outline=item.get('outline', ''),
+                        hook=item.get('hook', ''),
+                        key_events=item.get('key_events', [])
+                    )
+                    outlines.append(outline)
+                return outlines[:count]
+        except (json.JSONDecodeError, KeyError):
+            pass
+        
+        # 尝试按 Markdown 章节标题分割
+        # 匹配模式：第X章、章节X、标题等
+        section_patterns = [
+            r'(?:^|\n)(#{1,3}\s*)?(?:第(\d+)章|章节标题)[^\n]*\n+(.*?)(?=\n#{1,3}\s*(?:第\d+章|章节标题)|$)',
+            r'(?:^|\n)#{1,3}\s*📖\s*[^\n]+\n+(.*?)(?=\n#{1,3}\s*📖|$)',
+        ]
+        
+        sections = []
+        for pattern in section_patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            if matches:
+                for match in matches:
+                    if len(match) == 2 and match[0]:
+                        sections.append((match[0], match[1]))
+                    elif len(match) == 1:
+                        sections.append((None, match[0]))
+        
+        if sections and len(sections) >= count:
+            for i, (chapter_num, section_content) in enumerate(sections[:count]):
+                actual_chapter_no = start_chapter_no + i
+                # 尝试从内容中提取标题
+                title_match = re.search(r'《([^》]+)》|「([^」]+)」|标题[：:]\s*([^\n]+)', section_content)
+                title = f"第{actual_chapter_no}章"
+                if title_match:
+                    title = title_match.group(1) or title_match.group(2) or title_match.group(3)
+                    title = title.strip()
+                
+                outline = ChapterOutline(
+                    chapter_no=actual_chapter_no,
+                    title=title,
+                    outline=section_content.strip()[:1000],
+                    hook=self._extract_hook(section_content),
+                    key_events=[]
+                )
+                outlines.append(outline)
+            if outlines:
+                return outlines[:count]
+        
+        # 尝试按章节分割内容（备用）
+        chapter_patterns = [
+            r'第(\d+)章[：:]\s*([^\n]+)',
+            r'##\s*第(\d+)章[：:]*\s*([^\n]+)',
+            r'\*\*第(\d+)章\*\*[：:]*\s*([^\n]+)',
+        ]
+        
+        chapters_found = []
+        for pattern in chapter_patterns:
+            matches = re.findall(pattern, content)
+            for match in matches:
+                chapter_no = int(match[0])
+                title = match[1].strip() if len(match) > 1 else f"第{chapter_no}章"
+                chapters_found.append((chapter_no, title))
+        
+        # 如果找不到格式化的章节，尝试按段落分割
+        if not chapters_found:
+            # 将内容分成 count 个部分
+            paragraphs = content.split('\n\n')
+            paragraphs = [p.strip() for p in paragraphs if p.strip()]
+            
+            for i in range(min(count, len(paragraphs))):
+                chapter_no = start_chapter_no + i
+                para = paragraphs[i] if i < len(paragraphs) else ""
+                
+                # 尝试从段落中提取标题
+                first_line = para.split('\n')[0] if '\n' in para else para[:50]
+                title = first_line.strip('#*【】[]').strip()
+                if len(title) > 30:
+                    title = title[:30] + "..."
+                
+                # 提取大纲内容（去掉标题行）
+                outline_content = para
+                if '\n' in para:
+                    lines = para.split('\n')
+                    outline_content = '\n'.join(lines[1:]) if len(lines) > 1 else para
+                
+                outline = ChapterOutline(
+                    chapter_no=chapter_no,
+                    title=title or f"第{chapter_no}章",
+                    outline=outline_content[:500] if len(outline_content) > 500 else outline_content,
+                    hook=self._extract_hook(outline_content),
+                    key_events=[]
+                )
+                outlines.append(outline)
+        else:
+            # 使用找到的章节信息
+            for i, (chapter_no, title) in enumerate(chapters_found[:count]):
+                actual_chapter_no = start_chapter_no + i
+                
+                # 提取该章节的大纲内容
+                section_start = content.find(f'{chapter_no}章')
+                if section_start == -1:
+                    section_start = content.find(f'**第{chapter_no}章**')
+                if section_start == -1:
+                    section_start = content.find(f'## 第{chapter_no}章')
+                
+                section_end = len(content)
+                for j in range(i + 1, len(chapters_found)):
+                    next_chapter_start = content.find(f'{chapters_found[j][0]}章')
+                    if next_chapter_start != -1 and next_chapter_start > section_start:
+                        section_end = next_chapter_start
+                        break
+                
+                section_content = content[section_start:section_end] if section_start < section_end else content[section_start:section_start+500]
+                
+                outline = ChapterOutline(
+                    chapter_no=actual_chapter_no,
+                    title=title,
+                    outline=section_content[:500],
+                    hook=self._extract_hook(section_content),
+                    key_events=[]
+                )
+                outlines.append(outline)
+        
+        # 如果解析失败或数量不足，填充默认数据
+        while len(outlines) < count:
+            i = len(outlines)
+            outline = ChapterOutline(
+                chapter_no=start_chapter_no + i,
+                title=f"第{start_chapter_no + i}章",
+                outline=f"章节大纲内容（LLM生成）",
+                hook="章节钩子",
+                key_events=[]
+            )
+            outlines.append(outline)
+        
+        return outlines[:count]
+
+    def _extract_hook(self, content: str) -> str:
+        """从内容中提取钩子/悬念"""
+        hook_patterns = [
+            r'钩子[：:]\s*([^\n]+)',
+            r'悬念[：:]\s*([^\n]+)',
+            r'结尾[：:]\s*([^\n]+)',
+        ]
+        
+        for pattern in hook_patterns:
+            match = re.search(pattern, content)
+            if match:
+                return match.group(1).strip()
+        
+        # 如果找不到，返回最后一句
+        sentences = content.split('。')
+        if len(sentences) > 1:
+            return sentences[-2].strip() + "。" if sentences[-2] else ""
+        
+        return ""
