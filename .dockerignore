@@ -1,0 +1,27 @@
+# .dockerignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.env
+.venv
+env/
+venv/
+.git
+.gitignore
+.dockerignore
+README.md
+*.md
+docs
+frontend/node_modules
+frontend/dist
