@@ -16,8 +16,12 @@ class ChapterBase(BaseModel):
     hook: Optional[str] = None
 
 
-class ChapterCreate(ChapterBase):
-    project_id: int
+class ChapterCreate(BaseModel):
+    """创建章节 - project_id 从路径参数获取"""
+    chapter_no: Optional[int] = Field(None, ge=1)
+    title: Optional[str] = Field(None, max_length=200)
+    outline: Optional[str] = None
+    hook: Optional[str] = None
     volume_id: Optional[int] = None
 
 
@@ -31,12 +35,18 @@ class ChapterUpdate(BaseModel):
     word_count: Optional[int] = Field(None, ge=0)
 
 
-class ChapterResponse(ChapterBase):
+class ChapterResponse(BaseModel):
     id: int
     project_id: int
-    volume_id: Optional[int]
+    chapter_no: int
+    title: Optional[str] = None
+    outline: Optional[str] = None
+    text: Optional[str] = None
+    summary: Optional[str] = None
+    hook: Optional[str] = None
+    volume_id: Optional[int] = None
     status: ChapterStatus
-    word_count: int
+    word_count: int = 0
     created_at: datetime
     updated_at: datetime
 
