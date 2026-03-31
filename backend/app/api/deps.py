@@ -1,12 +1,12 @@
 """API 依赖注入"""
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.llm.base import LLMProvider
-from app.llm.factory import get_llm_provider
+from app.llm.factory import create_llm_provider
 from app.services.planner.service import PlannerService
 from app.services.memory.service import MemoryService
 from app.services.writer.service import WriterService
@@ -16,6 +16,12 @@ from app.services.publish.service import PublishService
 
 # Database session
 AsyncDBSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_llm_provider() -> LLMProvider:
+    """获取 LLM Provider"""
+    return create_llm_provider()
+
 
 # LLM Provider
 LLMProviderType = Annotated[LLMProvider, Depends(get_llm_provider)]

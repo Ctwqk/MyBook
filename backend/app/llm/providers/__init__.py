@@ -5,6 +5,7 @@ from .ollama_provider import OllamaProvider
 from .siliconflow_provider import SiliconFlowProvider
 from .deepseek_provider import DeepSeekProvider
 from .zhipu_provider import ZhipuProvider
+from .minimax_provider import MiniMaxProvider
 
 __all__ = [
     "OpenAIProvider",
@@ -13,4 +14,5 @@ __all__ = [
     "SiliconFlowProvider",
     "DeepSeekProvider",
     "ZhipuProvider",
+    "MiniMaxProvider",
 ]

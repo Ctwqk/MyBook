@@ -22,6 +22,7 @@ from app.schemas.review import (
 )
 from app.services.writer.service import WriterService
 from app.services.reviewer.service import ReviewerService
+from app.api.deps import get_writer_service, get_reviewer_service
 
 router = APIRouter(prefix="/projects/{project_id}/chapters", tags=["chapters"])
 
@@ -138,7 +139,8 @@ async def generate_chapter_text(
     project_id: int,
     chapter_id: int,
     request: GenerateChapterRequest = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    writer: WriterService = Depends(get_writer_service)
 ):
     """生成章节正文"""
     repo = ChapterRepository(db)
@@ -153,7 +155,6 @@ async def generate_chapter_text(
     if request is None:
         request = GenerateChapterRequest()
     
-    writer = WriterService(db)
     result = await writer.generate_chapter(project_id, chapter_id, request)
     
     return {
@@ -252,7 +253,8 @@ async def review_chapter(
     project_id: int,
     chapter_id: int,
     request: ReviewRequest = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    reviewer: ReviewerService = Depends(get_reviewer_service)
 ):
     """审查章节"""
     repo = ChapterRepository(db)
@@ -267,7 +269,6 @@ async def review_chapter(
     if request is None:
         request = ReviewRequest()
     
-    reviewer = ReviewerService(db)
     result = await reviewer.review_chapter(project_id, chapter_id, request)
     
     return result

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # ==========================
     # LLM Provider 全局配置
     # ==========================
-    llm_provider: Literal["mock", "openai", "anthropic", "ollama", "siliconflow", "deepseek", "zhipu"] = "mock"
+    llm_provider: Literal["mock", "openai", "anthropic", "ollama", "siliconflow", "deepseek", "zhipu", "minimax"] = "mock"
 
     # ==========================
     # OpenAI 兼容 API
@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     zhipu_model: str = "glm-4"
     zhipu_temperature: float = 0.7
     zhipu_max_tokens: int = 4096
+
+    # ==========================
+    # MiniMax
+    # ==========================
+    minimax_api_key: str = ""
+    minimax_base_url: str = "https://api.minimaxi.com/v1"
+    minimax_model: str = "MiniMax-Text-01"
+    minimax_temperature: float = 0.7
+    minimax_max_tokens: int = 4096
 
     # ==========================
     # 各模块默认模型
@@ -133,6 +142,13 @@ class Settings(BaseSettings):
                 "model": self.zhipu_model,
                 "temperature": self.zhipu_temperature,
                 "max_tokens": self.zhipu_max_tokens,
+            },
+            "minimax": {
+                "api_key": self.minimax_api_key,
+                "base_url": self.minimax_base_url,
+                "model": self.minimax_model,
+                "temperature": self.minimax_temperature,
+                "max_tokens": self.minimax_max_tokens,
             },
         }
         return configs.get(p, {})

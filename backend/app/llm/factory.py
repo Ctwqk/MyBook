@@ -11,6 +11,7 @@ from .providers import (
     SiliconFlowProvider,
     DeepSeekProvider,
     ZhipuProvider,
+    MiniMaxProvider,
 )
 
 
@@ -89,6 +90,15 @@ def create_llm_provider(
             max_tokens=kwargs.get("max_tokens", settings.zhipu_max_tokens),
         )
     
+    elif provider == "minimax":
+        return MiniMaxProvider(
+            api_key=settings.minimax_api_key,
+            base_url=settings.minimax_base_url,
+            model=model or settings.minimax_model,
+            temperature=kwargs.get("temperature", settings.minimax_temperature),
+            max_tokens=kwargs.get("max_tokens", settings.minimax_max_tokens),
+        )
+    
     else:
         # 默认返回 Mock
         return MockProvider(model=model or "mock-gpt4")
@@ -118,3 +128,6 @@ def create_module_provider(module: str, **kwargs) -> LLMProvider:
         model = None
     
     return create_llm_provider(model=model, **kwargs)
+
+# Alias for backwards compatibility
+get_llm_provider = create_llm_provider

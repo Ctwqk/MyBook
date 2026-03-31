@@ -1,18 +1,18 @@
-"""OpenAI 兼容 API Provider"""
+"""MiniMax API Provider - 使用 api.minimaxi.com/v1"""
 import httpx
 from typing import Any, Optional
 
 from ..base import LLMProvider, LLMResponse
 
 
-class OpenAIProvider(LLMProvider):
-    """OpenAI 兼容格式的 LLM Provider"""
+class MiniMaxProvider(LLMProvider):
+    """MiniMax LLM Provider，使用 api.minimaxi.com/v1 兼容 OpenAI 格式"""
 
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.openai.com/v1",
-        model: str = "gpt-4o",
+        base_url: str = "https://api.minimaxi.com/v1",
+        model: str = "MiniMax-Text-01",
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ):
@@ -22,7 +22,7 @@ class OpenAIProvider(LLMProvider):
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=300.0,
+            timeout=120.0,
         )
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> LLMResponse:
@@ -41,7 +41,7 @@ class OpenAIProvider(LLMProvider):
         response_schema: dict[str, Any],
         **kwargs
     ) -> dict[str, Any]:
-        """生成结构化输出 (使用 JSON Mode)"""
+        """生成结构化输出"""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -52,7 +52,6 @@ class OpenAIProvider(LLMProvider):
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "response_format": {"type": "json_object"},
         })
 
         content = response["choices"][0]["message"]["content"]
