@@ -1,87 +1,113 @@
+"""Planner Service Prompts"""
+
 PREMISE_ANALYSIS_PROMPT = """
-请分析以下小说想法，提取核心元素：
+请分析故事前提，提取核心要素。
 
-{premise}
+故事概述：
+{synopsis}
 
-请输出JSON格式：
-{{"genre":"类型","theme":"主题","tone":"基调","target_audience":"目标读者","key_elements":["关键元素1","关键元素2"],"potential_conflicts":["潜在冲突1","潜在冲突2"]}}
+请提取并输出：
+1. 核心主题
+2. 主要冲突
+3. 关键角色类型
+4. 故事基调
+
+请用结构化格式输出。
 """
 
 STORY_BIBLE_PROMPT = """
-为小说项目创建Story Bible：
+请为小说项目创建故事设定。
 
-项目标题: {project_title}
-剧情简述: {premise}
-类型: {genre}
-风格: {style}
+【重要】输出要求：
+1. 只输出故事设定内容，不要输出任何思考过程
+2. 设定内容要详细、完整
 
-请生成：
-1. 世界观设定（200字）
-2. 主题探讨（100字）
-3. 主要角色设定（每个150字）
-4. 故事弧线概述（200字）
+类型：{genre}
+主题：{theme}
+基调：{tone}
+概述：{synopsis}
 
-直接输出内容，不需要特殊格式。
+请输出完整的故事设定文档。
 """
 
 CHARACTER_CARD_PROMPT = """
-为"{project_title}"项目生成{count}个角色：
+请为小说角色创建角色卡。
 
-剧情：{premise}
+【重要】输出要求：
+1. 只输出角色卡内容，不要输出任何思考过程
+2. 角色信息要详细、生动
 
-请为每个角色输出：
-- 姓名：
-- 角色类型（主角/反派/配角）：
-- 背景：
-- 性格特点：
-- 动机：
-- 秘密/隐藏面：
+角色名称：{name}
+角色类型：{role_type}
 
-直接输出即可。
+请创建角色卡。
 """
 
 ARC_PLAN_PROMPT = """
-为"{project_title}"项目规划{total_arcs}个故事弧线：
+请规划故事线的起承转合。
 
-剧情：{premise}
-每个弧线目标章节数：{target_chapters_per_arc}
+【重要】输出要求：
+1. 只输出故事线规划，不要输出任何思考过程
+2. 确保情节递进合理
 
-请为每个弧线输出：
-- 弧线编号和标题
-- 弧线目标
-- 主要冲突
-- 预期章节数
+故事主题：{theme}
+总章节数：{total_chapters}
 
-直接输出即可。
+请规划故事线。
 """
 
 CHAPTER_OUTLINE_PROMPT = """
-请为小说项目生成{count}个章节大纲。
+请为小说项目的第 {chapter_no} 章创作详细大纲。
 
-项目标题: {project_title}
-剧情简述: {premise}
-起始章节号: {start_chapter_no}
+【重要】输出要求：
+1. 只输出章节大纲内容，不要输出任何思考过程
+2. 大纲格式清晰，使用"起、承、转、合"结构
+3. 最后可加"钩子"用于吸引读者继续阅读
 
-请为每个章节生成简洁大纲，格式如下（每个章节50-100字）：
+故事信息：
+- 项目类型：{genre}
+- 故事主题：{theme}
+- 故事基调：{tone}
+- 故事概述：{synopsis}
 
-章节{start_chapter_no}：
-起：xxx
-承：xxx
-转：xxx
-合：xxx
-钩子：xxx
+前几章概要：
+{previous_chapters}
 
-章节2：
-起：xxx
-承：xxx
-转：xxx
-合：xxx
-钩子：xxx
+章节要求：
+- 章节号：{chapter_no}
+- 章节标题：{title}
 
-（继续直到第{count}章，每章格式相同）
+请创作章节大纲。
+"""
 
-注意：
-- 每个章节大纲控制在50-100字
-- 确保章节之间有逻辑连贯
-- 钩子要能吸引读者
+CHAPTER_BATCH_OUTLINE_PROMPT = """
+请为小说项目规划 {total_chapters} 章的大纲。
+
+【重要】输出要求：
+1. 只输出章节大纲列表，不要输出任何思考过程
+2. 每章大纲使用"起、承、转、合"结构
+3. 确保章节之间情节连贯，伏笔铺设合理
+
+故事信息：
+- 项目类型：{genre}
+- 故事主题：{theme}
+- 故事基调：{tone}
+- 故事概述：{synopsis}
+
+请规划 {total_chapters} 章的大纲。
+"""
+
+CHAPTER_REVISION_PROMPT = """
+请修改第 {chapter_no} 章的大纲。
+
+【重要】输出要求：
+1. 只输出修改后的章节大纲，不要输出任何思考过程
+
+原大纲：
+{original_outline}
+
+修改要求：
+{revision_request}
+
+请输出修改后的大纲。
 """

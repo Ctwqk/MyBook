@@ -4,6 +4,11 @@
 CHAPTER_GENERATION_PROMPT = """
 请为小说项目生成第 {chapter_no} 章的正文。
 
+【重要】输出要求：
+1. 只输出小说正文，不要输出任何思考过程、注释或元信息
+2. 不要在正文中包含"<think>"、"## 大纲"、"起："、"承："、"转："、"合："等标记
+3. 正文章节以章节标题开头，如 "# 第{chapter_no}章：章节标题"
+
 章节信息：
 - 章节号：{chapter_no}
 - 标题：{title}
@@ -15,13 +20,17 @@ CHAPTER_GENERATION_PROMPT = """
 
 {style_hints}
 
-请根据以上信息，创作引人入胜的小说章节。保持文笔流畅，情节紧凑。
+请创作引人入胜的小说章节。保持文笔流畅，情节紧凑。
 章节长度建议在 2000-4000 字之间。
 """
 
 
 CHAPTER_CONTINUATION_PROMPT = """
 请续写小说第 {chapter_no} 章。
+
+【重要】输出要求：
+1. 只输出续写内容，不要输出任何思考过程
+2. 保持与已有内容的风格一致
 
 已有内容：
 {existing_text}
@@ -41,6 +50,9 @@ CHAPTER_CONTINUATION_PROMPT = """
 CHAPTER_REWRITE_PROMPT = """
 请重写小说第 {chapter_no} 章。
 
+【重要】输出要求：
+1. 只输出重写后的正文，不要输出任何思考过程或注释
+
 原内容：
 {existing_text}
 
@@ -50,12 +62,15 @@ CHAPTER_REWRITE_PROMPT = """
 故事上下文：
 {context}
 
-请按照修改指令重写章节，保持核心情节不变，但改进指定问题。
+请按照修改指令重写章节，保持核心情节不变。
 """
 
 
 CHAPTER_PATCH_PROMPT = """
 请修补小说第 {chapter_no} 章中的特定段落。
+
+【重要】输出要求：
+1. 只输出修补后的段落内容，不要输出任何思考过程
 
 章节内容：
 {existing_text}
@@ -66,7 +81,7 @@ CHAPTER_PATCH_PROMPT = """
 修补指令：
 {patch_instructions}
 
-请只输出修补后的段落内容，不要输出其他内容。
+请只输出修补后的段落内容。
 """
 
 

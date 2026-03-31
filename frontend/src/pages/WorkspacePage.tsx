@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Layout, Button, Card, List, Space, Spin, message, Modal, Form, Input, Select, Divider, Collapse, Typography, Tag } from 'antd'
-import { PlusOutlined, EditOutlined, MenuFoldOutlined, MenuUnfoldOutlined, BookOutlined, TeamOutlined, FileTextOutlined } from '@ant-design/icons'
+import { Layout, Button, Card, Space, Spin, message, Modal, Form, Input, Select, Collapse, Typography, Tag } from 'antd'
+import { PlusOutlined, EditOutlined, BookOutlined, TeamOutlined } from '@ant-design/icons'
 import { projectApi, chapterApi, memoryApi } from '../api'
 import { useProjectStore } from '../store/projectStore'
 
@@ -18,15 +18,12 @@ const WorkspacePage = () => {
   const [storyBible, setStoryBible] = useState<any>(null)
   const [characters, setCharacters] = useState<any[]>([])
   const [selectedChapter, setSelectedChapter] = useState<any>(null)
-  const [chapterSidebarCollapsed, setChapterSidebarCollapsed] = useState(false)
-  const [rightSidebarTab, setRightSidebarTab] = useState<'outline' | 'content' | 'summary'>('content')
+  const [activeTab, setActiveTab] = useState<'content' | 'outline' | 'summary'>('content')
   
-  // 新建角色弹窗
   const [createCharModalOpen, setCreateCharModalOpen] = useState(false)
   const [createCharForm] = Form.useForm()
   const [createCharLoading, setCreateCharLoading] = useState(false)
   
-  // 编辑故事设定弹窗
   const [editBibleModalOpen, setEditBibleModalOpen] = useState(false)
   const [editBibleForm] = Form.useForm()
   const [editBibleLoading, setEditBibleLoading] = useState(false)
@@ -150,234 +147,84 @@ const WorkspacePage = () => {
     return colors[status] || 'default'
   }
 
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      outline: '大纲',
+      draft: '草稿',
+      writing: '写作中',
+      reviewing: '审查中',
+      approved: '已完成',
+    }
+    return labels[status] || status
+  }
+
   if (loading) {
     return <Spin size="large" style={{ display: 'flex', justifyContent: 'center', marginTop: 100 }} />
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
-      {/* 顶部导航栏 */}
+    <Layout style={{ minHeight: '100vh', background: '#f0f2f5' }}>
+      {/* 顶部导航 */}
       <Layout.Header style={{ background: '#001529', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <Space>
           <BookOutlined style={{ fontSize: 24, color: '#fff' }} />
           <span style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{currentProject?.title || '项目'}</span>
-          <Tag color={currentProject?.genre === '科幻' ? 'blue' : 'green'}>{currentProject?.genre || '未分类'}</Tag>
-        </div>
+          {currentProject?.genre && <Tag color="blue">{currentProject.genre}</Tag>}
+        </Space>
         <Space>
           <Button type="primary" onClick={() => navigate(`/projects/${projectId}/memory`)}>记忆库</Button>
           <Button onClick={() => navigate(`/projects/${projectId}/publish`)}>发布</Button>
         </Space>
       </Layout.Header>
 
-      <Layout.Content style={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
-        {/* 左侧章节列表 - 可折叠 */}
+      <Layout>
         <Sider 
-          width={320} 
-          collapsedWidth={0}
-          collapsed={chapterSidebarCollapsed}
-          style={{ 
-            background: '#fff', 
-            borderRight: '1px solid #e8e8e8',
-            overflow: 'auto'
-          }}
+          width={300} 
+          style={{ background: '#fff', borderRight: '1px solid #e8e8e8', overflow: 'auto' }}
         >
-          <div style={{ padding: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text strong style={{ fontSize: 16 }}>📖 章节列表</Text>
-              <Button 
-                type="text" 
-                icon={<MenuFoldOutlined />} 
-                onClick={() => setChapterSidebarCollapsed(true)}
-              />
-            </div>
-            
-            <List
-              dataSource={chapters}
-              renderItem={(chapter) => (
+          <Collapse defaultActiveKey={['chapters', 'story', 'characters']} ghost>
+            {/* 章节列表 */}
+            <Panel 
+              header={<span><BookOutlined /> 章节 ({chapters.length})</span>} 
+              key="chapters"
+            >
+              {chapters.map((chapter) => (
                 <Card 
-                  size="small" 
+                  key={chapter.id}
+                  size="small"
                   hoverable
                   onClick={() => setSelectedChapter(chapter)}
                   style={{ 
                     marginBottom: 8, 
                     cursor: 'pointer',
-                    borderColor: selectedChapter?.id === chapter.id ? '#1890ff' : '#e8e8e8',
+                    borderColor: selectedChapter?.id === chapter.id ? '#1890ff' : '#f0f0f0',
                     background: selectedChapter?.id === chapter.id ? '#e6f7ff' : '#fff'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
                       <Text strong style={{ fontSize: 14 }}>
-                        第{chapter.chapter_no}章: {chapter.title?.replace(/^章节\d+：/, '') || '无标题'}
+                        第{chapter.chapter_no}章
                       </Text>
-                      <div style={{ marginTop: 4 }}>
-                        <Tag color={getStatusColor(chapter.status)} style={{ marginRight: 4 }}>
-                          {chapter.status === 'outline' ? '大纲' : chapter.status === 'draft' ? '草稿' : chapter.status}
+                      <div style={{ marginTop: 2 }}>
+                        <Tag color={getStatusColor(chapter.status)} style={{ fontSize: 10 }}>
+                          {getStatusLabel(chapter.status)}
                         </Tag>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {chapter.word_count || 0} 字
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+                          {chapter.word_count || 0}字
                         </Text>
                       </div>
-                      {chapter.outline && (
-                        <div style={{ marginTop: 4 }}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {chapter.outline.slice(0, 60)}...
-                          </Text>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                  <Space style={{ marginTop: 8 }}>
-                    <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleGenerateChapter(chapter.id) }}>
-                      生成
-                    </Button>
-                    <Button size="small" onClick={(e) => { e.stopPropagation(); handleReviewChapter(chapter.id) }}>
-                      审查
-                    </Button>
-                  </Space>
-                </Card>
-              )}
-              locale={{ emptyText: '暂无章节' }}
-            />
-          </div>
-        </Sider>
-
-        {/* 主内容区 */}
-        <Content style={{ flex: 1, padding: 24, overflow: 'auto' }}>
-          {selectedChapter ? (
-            <div style={{ display: 'flex', gap: 24, height: '100%' }}>
-              {/* 左侧：章节信息 */}
-              <div style={{ width: 320, flexShrink: 0 }}>
-                <Card 
-                  title={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>📋 章节信息</span>
-                      {!chapterSidebarCollapsed && (
-                        <Button 
-                          type="text" 
-                          icon={<MenuUnfoldOutlined />} 
-                          onClick={() => setChapterSidebarCollapsed(false)}
-                        />
-                      )}
-                    </div>
-                  }
-                >
-                  <div style={{ marginBottom: 16 }}>
-                    <Text strong>标题：</Text>
-                    <div>{selectedChapter.title || `第${selectedChapter.chapter_no}章`}</div>
-                  </div>
-                  <div style={{ marginBottom: 16 }}>
-                    <Text strong>状态：</Text>
-                    <Tag color={getStatusColor(selectedChapter.status)} style={{ marginLeft: 8 }}>
-                      {selectedChapter.status}
-                    </Tag>
-                  </div>
-                  <div style={{ marginBottom: 16 }}>
-                    <Text strong>字数：</Text>
-                    <span style={{ marginLeft: 8 }}>{selectedChapter.word_count || 0}</span>
-                  </div>
-                  
-                  <Divider>大纲</Divider>
-                  <div style={{ 
-                    background: '#fafafa', 
-                    padding: 12, 
-                    borderRadius: 4,
-                    maxHeight: 200,
-                    overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    fontSize: 13,
-                    lineHeight: 1.6
-                  }}>
-                    {selectedChapter.outline || '暂无大纲'}
+                    <Space size={4}>
+                      <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleGenerateChapter(chapter.id) }}>生成</Button>
+                      <Button size="small" onClick={(e) => { e.stopPropagation(); handleReviewChapter(chapter.id) }}>审查</Button>
+                    </Space>
                   </div>
                 </Card>
-              </div>
-
-              {/* 右侧：正文 */}
-              <div style={{ flex: 1 }}>
-                <Card 
-                  title={
-                    <div style={{ display: 'flex', gap: 16 }}>
-                      <Button 
-                        type={rightSidebarTab === 'content' ? 'primary' : 'default'}
-                        onClick={() => setRightSidebarTab('content')}
-                      >
-                        📝 正文
-                      </Button>
-                      <Button 
-                        type={rightSidebarTab === 'summary' ? 'primary' : 'default'}
-                        onClick={() => setRightSidebarTab('summary')}
-                      >
-                        📌 摘要
-                      </Button>
-                      <Button 
-                        type={rightSidebarTab === 'outline' ? 'primary' : 'default'}
-                        onClick={() => setRightSidebarTab('outline')}
-                      >
-                        📋 大纲
-                      </Button>
-                    </div>
-                  }
-                  style={{ height: '100%' }}
-                  bodyStyle={{ height: 'calc(100% - 60px)', overflow: 'auto' }}
-                >
-                  {rightSidebarTab === 'content' && (
-                    <div style={{ 
-                      whiteSpace: 'pre-wrap', 
-                      lineHeight: 1.8, 
-                      fontSize: 15,
-                      padding: '0 8px'
-                    }}>
-                      {selectedChapter.text || '暂无正文，点击"生成"按钮开始创作'}
-                    </div>
-                  )}
-                  {rightSidebarTab === 'summary' && (
-                    <div style={{ 
-                      whiteSpace: 'pre-wrap', 
-                      lineHeight: 1.8,
-                      background: '#fafafa',
-                      padding: 16,
-                      borderRadius: 4
-                    }}>
-                      {selectedChapter.summary || '暂无摘要'}
-                    </div>
-                  )}
-                  {rightSidebarTab === 'outline' && (
-                    <div style={{ 
-                      whiteSpace: 'pre-wrap', 
-                      lineHeight: 1.8,
-                      background: '#fafafa',
-                      padding: 16,
-                      borderRadius: 4
-                    }}>
-                      {selectedChapter.outline || '暂无大纲'}
-                    </div>
-                  )}
-                </Card>
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: 100, background: '#fff', borderRadius: 8 }}>
-              <FileTextOutlined style={{ fontSize: 64, color: '#ccc' }} />
-              <div style={{ marginTop: 16, fontSize: 18, color: '#999' }}>
-                {chapterSidebarCollapsed ? (
-                  <Button type="primary" icon={<MenuUnfoldOutlined />} onClick={() => setChapterSidebarCollapsed(false)}>
-                    打开章节列表
-                  </Button>
-                ) : (
-                  <>
-                    <p>从左侧选择一个章节开始</p>
-                    <p style={{ fontSize: 14, color: '#ccc' }}>点击章节卡片查看和编辑</p>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-        </Content>
-
-        {/* 右侧边栏：故事设定 */}
-        <Sider width={280} style={{ background: '#fff', borderLeft: '1px solid #e8e8e8', overflow: 'auto' }}>
-          <Collapse defaultActiveKey={['story', 'characters']} ghost>
+              ))}
+            </Panel>
+            
+            {/* 故事设定 */}
             <Panel 
               header={<span><BookOutlined /> 故事设定</span>} 
               key="story"
@@ -388,18 +235,21 @@ const WorkspacePage = () => {
                   <div style={{ marginBottom: 8 }}><Text strong>类型：</Text>{storyBible.genre}</div>
                   <div style={{ marginBottom: 8 }}><Text strong>主题：</Text>{storyBible.theme || '待填充'}</div>
                   <div style={{ marginBottom: 8 }}><Text strong>基调：</Text>{storyBible.tone || '待填充'}</div>
-                  <div style={{ marginBottom: 8 }}>
-                    <Text strong>概述：</Text>
-                    <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                      {storyBible.synopsis?.slice(0, 150) || '待填充'}...
+                  {storyBible.synopsis && (
+                    <div>
+                      <Text strong>概述：</Text>
+                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                        {storyBible.synopsis.slice(0, 100)}...
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               ) : (
                 <Text type="secondary">暂无故事设定</Text>
               )}
             </Panel>
             
+            {/* 角色 */}
             <Panel 
               header={<span><TeamOutlined /> 角色 ({characters.length})</span>}
               key="characters"
@@ -429,7 +279,81 @@ const WorkspacePage = () => {
             </Panel>
           </Collapse>
         </Sider>
-      </Layout.Content>
+
+        <Content style={{ padding: 24, overflow: 'auto' }}>
+          {selectedChapter ? (
+            <Card 
+              title={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Text strong style={{ fontSize: 16 }}>第{selectedChapter.chapter_no}章</Text>
+                    <Tag color={getStatusColor(selectedChapter.status)}>
+                      {getStatusLabel(selectedChapter.status)}
+                    </Tag>
+                    <Text type="secondary">{selectedChapter.word_count || 0} 字</Text>
+                  </Space>
+                  <Space>
+                    <Button type={activeTab === 'content' ? 'primary' : 'default'} onClick={() => setActiveTab('content')}>
+                      正文
+                    </Button>
+                    <Button type={activeTab === 'outline' ? 'primary' : 'default'} onClick={() => setActiveTab('outline')}>
+                      大纲
+                    </Button>
+                    <Button type={activeTab === 'summary' ? 'primary' : 'default'} onClick={() => setActiveTab('summary')}>
+                      摘要
+                    </Button>
+                  </Space>
+                </div>
+              }
+              style={{ height: 'calc(100vh - 140px)' }}
+              bodyStyle={{ height: 'calc(100% - 60px)', overflow: 'auto', padding: 24 }}
+            >
+              {activeTab === 'content' && (
+                <div style={{ 
+                  whiteSpace: 'pre-wrap', 
+                  lineHeight: 2, 
+                  fontSize: 16,
+                  letterSpacing: '0.5px'
+                }}>
+                  {selectedChapter.text || '暂无正文，点击"生成"按钮开始创作'}
+                </div>
+              )}
+              {activeTab === 'outline' && (
+                <div style={{ 
+                  whiteSpace: 'pre-wrap', 
+                  lineHeight: 1.8,
+                  background: '#fafafa',
+                  padding: 20,
+                  borderRadius: 8,
+                  fontSize: 14
+                }}>
+                  {selectedChapter.outline || '暂无大纲'}
+                </div>
+              )}
+              {activeTab === 'summary' && (
+                <div style={{ 
+                  whiteSpace: 'pre-wrap', 
+                  lineHeight: 1.8,
+                  background: '#fafafa',
+                  padding: 20,
+                  borderRadius: 8,
+                  fontSize: 14
+                }}>
+                  {selectedChapter.summary || '暂无摘要'}
+                </div>
+              )}
+            </Card>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 100, background: '#fff', borderRadius: 8 }}>
+              <BookOutlined style={{ fontSize: 64, color: '#ccc' }} />
+              <div style={{ marginTop: 16, fontSize: 18, color: '#999' }}>
+                <p>从左侧选择章节开始阅读</p>
+                <p style={{ fontSize: 14, color: '#ccc' }}>点击章节卡片查看正文</p>
+              </div>
+            </div>
+          )}
+        </Content>
+      </Layout>
 
       {/* 新建角色弹窗 */}
       <Modal
@@ -454,9 +378,6 @@ const WorkspacePage = () => {
           <Form.Item name="profile" label="角色简介">
             <Input.TextArea rows={3} placeholder="请输入角色简介" />
           </Form.Item>
-          <Form.Item name="personality" label="性格特点">
-            <Input.TextArea rows={2} placeholder="请输入性格特点" />
-          </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => { setCreateCharModalOpen(false); createCharForm.resetFields() }}>取消</Button>
@@ -476,7 +397,6 @@ const WorkspacePage = () => {
         destroyOnClose
       >
         <Form form={editBibleForm} layout="vertical" onFinish={handleUpdateBible}>
-          <Divider>基本信息</Divider>
           <Form.Item name="title" label="标题">
             <Input placeholder="请输入故事标题" />
           </Form.Item>
@@ -488,10 +408,6 @@ const WorkspacePage = () => {
           </Form.Item>
           <Form.Item name="tone" label="基调">
             <Input.TextArea rows={2} placeholder="请输入故事基调" />
-          </Form.Item>
-          <Divider>故事概述</Divider>
-          <Form.Item name="logline" label="一句话简介">
-            <Input.TextArea rows={2} placeholder="用一句话概括整个故事" />
           </Form.Item>
           <Form.Item name="synopsis" label="详细概述">
             <Input.TextArea rows={4} placeholder="请输入故事详细概述" />
