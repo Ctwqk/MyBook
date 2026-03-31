@@ -255,7 +255,7 @@ const WorkspacePage = () => {
         />
       </Content>
 
-      <Sider width={400} style={{ background: '#fff', borderLeft: '1px solid #f0f0f0' }}>
+      <Sider width={600} style={{ background: '#fff', borderLeft: '1px solid #f0f0f0', overflow: 'auto' }}>
         <Tabs
           defaultActiveKey="content"
           items={[
@@ -263,11 +263,14 @@ const WorkspacePage = () => {
               key: 'content',
               label: '正文',
               children: (
-                <div style={{ padding: 16 }}>
+                <div style={{ padding: 16, height: 'calc(100vh - 120px)', overflow: 'auto' }}>
                   {selectedChapter ? (
                     <div>
                       <h3>{selectedChapter.title || `第${selectedChapter.chapter_no}章`}</h3>
-                      <div style={{ whiteSpace: 'pre-wrap' }}>
+                      <p style={{ color: '#666', fontSize: 12, marginBottom: 16 }}>
+                        字数: {selectedChapter.word_count || 0} | 状态: {selectedChapter.status}
+                      </p>
+                      <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
                         {selectedChapter.text || '暂无正文'}
                       </div>
                     </div>
