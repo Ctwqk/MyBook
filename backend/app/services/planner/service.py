@@ -373,8 +373,25 @@ class PlannerService:
         except (json.JSONDecodeError, KeyError):
             pass
         
+        # 尝试按简化格式解析（章节X：\n起：xxx\n承：xxx...）
+        simple_pattern = r'章节(\d+)[:：]\s*起[:：]\s*([^\n]+)\s*承[:：]\s*([^\n]+)\s*转[:：]\s*([^\n]+)\s*合[:：]\s*([^\n]+)\s*钩子[:：]\s*([^\n]+)'
+        simple_matches = re.findall(simple_pattern, content)
+        if simple_matches and len(simple_matches) >= count:
+            for i, match in enumerate(simple_matches[:count]):
+                chapter_num = int(match[0])
+                outline_text = f"起：{match[1]}\n承：{match[2]}\n转：{match[3]}\n合：{match[4]}"
+                outline = ChapterOutline(
+                    chapter_no=start_chapter_no + i,
+                    title=f"第{start_chapter_no + i}章",
+                    outline=outline_text,
+                    hook=match[5],
+                    key_events=[]
+                )
+                outlines.append(outline)
+            if outlines:
+                return outlines[:count]
+        
         # 尝试按 Markdown 章节标题分割
-        # 匹配模式：第X章、章节X、标题等
         section_patterns = [
             r'(?:^|\n)(#{1,3}\s*)?(?:第(\d+)章|章节标题)[^\n]*\n+(.*?)(?=\n#{1,3}\s*(?:第\d+章|章节标题)|$)',
             r'(?:^|\n)#{1,3}\s*📖\s*[^\n]+\n+(.*?)(?=\n#{1,3}\s*📖|$)',
@@ -393,7 +410,6 @@ class PlannerService:
         if sections and len(sections) >= count:
             for i, (chapter_num, section_content) in enumerate(sections[:count]):
                 actual_chapter_no = start_chapter_no + i
-                # 尝试从内容中提取标题
                 title_match = re.search(r'《([^》]+)》|「([^」]+)」|标题[：:]\s*([^\n]+)', section_content)
                 title = f"第{actual_chapter_no}章"
                 if title_match:
@@ -403,7 +419,7 @@ class PlannerService:
                 outline = ChapterOutline(
                     chapter_no=actual_chapter_no,
                     title=title,
-                    outline=section_content.strip()[:1000],
+                    outline=section_content.strip()[:500],
                     hook=self._extract_hook(section_content),
                     key_events=[]
                 )
