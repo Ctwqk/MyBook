@@ -67,12 +67,25 @@ class MiniMaxProvider(LLMProvider):
             "top_p": kwargs.get("top_p", None),
         })
 
+        # 清理思考标记
+        content = response["choices"][0]["message"]["content"]
+        content = self._clean_thinking_tags(content)
+
         return LLMResponse(
-            content=response["choices"][0]["message"]["content"],
+            content=content,
             model=response.get("model", self.model),
             usage=response.get("usage", {}),
             raw_response=response,
         )
+
+    def _clean_thinking_tags(self, text: str) -> str:
+        """移除思考标记"""
+        import re
+        # 移除 <think>...</think> 块
+        text = re.sub(r'<think>[\s\S]*?</think>', '', text)
+        # 移除 <thinking>...</thinking> 块
+        text = re.sub(r'<thinking>[\s\S]*?</thinking>', '', text)
+        return text.strip()
 
     async def _post(self, endpoint: str, data: dict) -> dict:
         """发送 POST 请求"""
