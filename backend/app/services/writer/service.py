@@ -1,4 +1,5 @@
 """Writer Service - 写作服务"""
+import re
 from typing import Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,20 @@ from app.services.writer.prompts import (
 class WriterService:
     """写作服务"""
 
+    # 清理用正则表达式
+    THINKING_PATTERNS = [
+        (r'<think>[\s\S]*?</think>', ''),           # 移除 <think>...</think> 块
+        (r'<thinking>[\s\S]*?</thinking>', ''),    # 移除 <thinking>...</thinking>
+        (r'## 章节大纲[\s\S]*?(?=\n#{1,3} |\Z)', ''),  # 移除大纲标题及内容
+        (r'\n*[-=]{3,}\n*章节大纲[^\n]*\n*[-=]{3,}\n*', '\n'),  # 移除大纲分隔符
+    ]
+    
+    OUTLINE_MARKERS = [
+        '起：', '承：', '转：', '合：', '钩子：',  # 大纲标记
+        '章节大纲', '本章大纲', '本章要点', 
+        '# 章节大纲', '## 大纲', '### 章节概要',
+    ]
+
     def __init__(
         self,
         db: AsyncSession,
@@ -36,6 +51,62 @@ class WriterService:
         self.llm = llm_provider or MockLLMProvider()
         self.chapter_repo = ChapterRepository(db)
         self.memory_service = MemoryService(db)
+
+    def _clean_text(self, text: str) -> str:
+        """清理 LLM 输出，移除 thinking 标记和混入的大纲"""
+        if not text:
+            return text
+        
+        # 1. 移除 thinking 块
+        for pattern, replacement in self.THINKING_PATTERNS:
+            text = re.sub(pattern, replacement, text)
+        
+        # 2. 检查是否混入了大纲（通过大纲标记判断）
+        lines = text.split('\n')
+        cleaned_lines = []
+        in_outline_block = False
+        outline_block_count = 0
+        
+        for line in lines:
+            # 检测大纲块开始
+            if any(marker in line for marker in ['## 章节大纲', '# 章节大纲', '## 大纲']):
+                in_outline_block = True
+                outline_block_count += 1
+                continue
+            
+            # 如果前面有多个大纲标记，说明进入大纲区域
+            if outline_block_count >= 2:
+                in_outline_block = True
+            
+            # 检测行首大纲标记（如 "起："）
+            stripped = line.strip()
+            is_outline_start = any(stripped.startswith(marker) for marker in self.OUTLINE_MARKERS)
+            
+            # 如果连续3行以上都是大纲格式，认为是混入的大纲
+            if is_outline_start:
+                outline_block_count += 1
+                if outline_block_count >= 3:
+                    in_outline_block = True
+                    continue
+            else:
+                outline_block_count = 0
+            
+            if not in_outline_block:
+                cleaned_lines.append(line)
+            else:
+                # 大纲块结束后恢复
+                if '## ' in line or '# ' in line:
+                    if not any(m in line for m in ['章节大纲', '大纲']):
+                        in_outline_block = False
+                        outline_block_count = 0
+                        cleaned_lines.append(line)
+        
+        text = '\n'.join(cleaned_lines)
+        
+        # 3. 清理多余空行
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        return text.strip()
 
     async def generate_chapter(
         self,
@@ -85,6 +156,9 @@ class WriterService:
         # 调用 LLM 生成
         response = await self.llm.generate(prompt, system_prompt)
         text = response.content
+        
+        # 清理输出：移除 thinking 标记和混入的大纲
+        text = self._clean_text(text)
         
         # 更新章节
         word_count = len(text) // 2  # 粗略估算中文字数
