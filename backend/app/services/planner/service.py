@@ -118,7 +118,7 @@ class PlannerService:
             title=project.title,
             genre=genre or project.genre,
             logline=premise,
-            synopsis=content[:2000] if len(content) > 2000 else content,
+            synopsis=content,
         )
         self.db.add(story_bible)
         
