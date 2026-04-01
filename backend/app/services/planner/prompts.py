@@ -22,87 +22,88 @@ STORY_BIBLE_PROMPT = """
 1. 只输出故事设定内容，不要输出任何思考过程
 2. 设定内容要详细、完整
 
+项目名称：{project_title}
+剧情简述：{premise}
 类型：{genre}
-主题：{theme}
-基调：{tone}
-概述：{synopsis}
+风格：{style}
 
 请输出完整的故事设定文档。
 """
 
 CHARACTER_CARD_PROMPT = """
-请为小说角色创建角色卡。
+请为小说项目创建角色。
 
 【重要】输出要求：
-1. 只输出角色卡内容，不要输出任何思考过程
+1. 只输出角色信息，不要输出任何思考过程
 2. 角色信息要详细、生动
 
-角色名称：{name}
-角色类型：{role_type}
+项目名称：{project_title}
+剧情简述：{premise}
+需要创建的角色数量：{count}
 
-请创建角色卡。
+请为这个故事创建 {count} 个角色，包括主角、配角和反派。每个角色需要有：
+- 姓名
+- 类型（主角/配角/反派）
+- 背景故事
+- 性格特点
+- 在故事中的作用
 """
 
 ARC_PLAN_PROMPT = """
-请规划故事线的起承转合。
+请为小说项目规划故事弧线。
 
 【重要】输出要求：
-1. 只输出故事线规划，不要输出任何思考过程
+1. 只输出故事弧线规划，不要输出任何思考过程
 2. 确保情节递进合理
 
-故事主题：{theme}
-总章节数：{total_chapters}
+项目名称：{project_title}
+剧情简述：{premise}
+总弧线数：{total_arcs}
+每弧线目标章节数：{target_chapters_per_arc}
 
-请规划故事线。
+请将故事分为 {total_arcs} 个弧线，每个弧线包含约 {target_chapters_per_arc} 章。
 """
 
 CHAPTER_OUTLINE_PROMPT = """
-请为小说项目的第 {chapter_no} 章创作详细大纲。
+请为小说项目规划章节大纲。
 
 【重要】输出要求：
-1. 只输出章节大纲内容，不要输出任何思考过程
-2. 大纲格式清晰，使用"起、承、转、合"结构
-3. 最后可加"钩子"用于吸引读者继续阅读
+1. 只输出章节大纲，不要输出任何思考过程
+2. 每章大纲使用"起、承、转、合"结构
 
-故事信息：
-- 项目类型：{genre}
-- 故事主题：{theme}
-- 故事基调：{tone}
-- 故事概述：{synopsis}
+项目名称：{project_title}
+剧情简述：{premise}
+起始章节号：{start_chapter_no}
+结束章节号：{end_chapter_no}
+卷ID（可选）：{volume_id}
 
-前几章概要：
-{previous_chapters}
+已有大纲：
+{existing_outlines}
 
-章节要求：
-- 章节号：{chapter_no}
-- 章节标题：{title}
-
-请创作章节大纲。
+请为第 {start_chapter_no} 章到第 {end_chapter_no} 章创建大纲。
 """
 
 CHAPTER_BATCH_OUTLINE_PROMPT = """
-请为小说项目规划 {total_chapters} 章的大纲。
+请为小说项目规划章节大纲。
 
 【重要】输出要求：
 1. 只输出章节大纲列表，不要输出任何思考过程
 2. 每章大纲使用"起、承、转、合"结构
-3. 确保章节之间情节连贯，伏笔铺设合理
 
-故事信息：
-- 项目类型：{genre}
-- 故事主题：{theme}
-- 故事基调：{tone}
-- 故事概述：{synopsis}
+项目名称：{project_title}
+剧情简述：{premise}
+总章节数：{total_chapters}
 
 请规划 {total_chapters} 章的大纲。
 """
 
 CHAPTER_REVISION_PROMPT = """
-请修改第 {chapter_no} 章的大纲。
+请修改章节大纲。
 
 【重要】输出要求：
-1. 只输出修改后的章节大纲，不要输出任何思考过程
+1. 只输出修改后的大纲，不要输出任何思考过程
 
+章节号：{chapter_no}
 原大纲：
 {original_outline}
 

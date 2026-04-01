@@ -269,9 +269,10 @@ class PlannerService:
         prompt = CHAPTER_OUTLINE_PROMPT.format(
             project_title=project.title,
             premise=project.premise or "待定义",
-            volume_id=volume_id,
+            volume_id=volume_id or "",
             count=count,
             start_chapter_no=next_chapter_no,
+            end_chapter_no=next_chapter_no + count - 1,
             existing_outlines="\n".join(existing_outlines) if existing_outlines else "暂无"
         )
         
