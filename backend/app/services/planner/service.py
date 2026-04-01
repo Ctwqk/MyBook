@@ -31,6 +31,12 @@ from app.services.planner.prompts import (
 class PlannerService:
     """规划服务"""
 
+    # 清理用正则表达式
+    THINKING_PATTERNS = [
+        (r'<think>[\s\S]*?</think>', ''),
+        (r'<thinking>[\s\S]*?</thinking>', ''),
+    ]
+
     def __init__(self, db: AsyncSession, llm_provider: Optional[LLMProvider] = None):
         self.db = db
         self.llm = llm_provider or create_llm_provider()
@@ -100,6 +106,11 @@ class PlannerService:
         
         response = await self.llm.generate(prompt, system_prompt)
         
+        # 清理 LLM 返回的思考标签
+        content = response.content
+        content = re.sub(r'<think>[\s\S]*?</think>', '', content)
+        content = re.sub(r'<thinking>[\s\S]*?</thinking>', '', content)
+        
         # TODO: 解析结构化输出
         # 创建 StoryBible 记录
         story_bible = StoryBible(
@@ -107,7 +118,7 @@ class PlannerService:
             title=project.title,
             genre=genre or project.genre,
             logline=premise,
-            synopsis=response.content[:2000] if len(response.content) > 2000 else response.content,
+            synopsis=content[:2000] if len(content) > 2000 else content,
         )
         self.db.add(story_bible)
         
@@ -116,7 +127,7 @@ class PlannerService:
             genre=genre or project.genre or "通用",
             theme="待定义",
             logline=premise,
-            synopsis=response.content[:1000],
+            synopsis=content[:1000],
             world_overview="待填充",
             narrative_structure={}
         )
