@@ -57,6 +57,7 @@ const AgentPromptsPage = () => {
     () => localStorage.getItem('use_custom_prompts') === 'true'
   )
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState('planner')
 
   const handleSave = () => {
     setSaving(true)
@@ -133,7 +134,10 @@ const AgentPromptsPage = () => {
         </Space>
       </div>
 
-      <Tabs items={Object.entries(agentInfo).map(([key, info]) => ({
+      <Tabs 
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key)}
+        items={Object.entries(agentInfo).map(([key, info]) => ({
         key,
         label: <span style={{ color: info.color }}>{info.title}</span>,
         children: (

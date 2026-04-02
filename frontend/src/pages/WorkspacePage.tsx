@@ -9,6 +9,14 @@ const { Sider, Content } = Layout
 const { Panel } = Collapse
 const { Text } = Typography
 
+// 角色类型映射
+const roleLabels: Record<string, string> = {
+  protagonist: '主角',
+  supporting: '配角',
+  antagonist: '反派',
+  minor: '路人'
+}
+
 const WorkspacePage = () => {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -89,9 +97,9 @@ const WorkspacePage = () => {
   const handleReviewChapter = async (chapterId: number) => {
     try {
       const res = await chapterApi.review(Number(projectId), chapterId)
-      message.info(`审查完成，评分: ${res.data.verdict.score}`)
-    } catch (err) {
-      message.error('审查失败')
+      message.success(`审查完成，评分: ${res.data.scores?.overall || res.data.verdict?.score || 'N/A'}`)
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || '审查失败，请重试')
     }
   }
 
@@ -158,6 +166,11 @@ const WorkspacePage = () => {
     return labels[status] || status
   }
 
+  // 获取角色类型中文标签
+  const getRoleLabel = (roleType: string) => {
+    return roleLabels[roleType] || roleType || '未知'
+  }
+
   if (loading) {
     return <Spin size="large" style={{ display: 'flex', justifyContent: 'center', marginTop: 100 }} />
   }
@@ -188,7 +201,7 @@ const WorkspacePage = () => {
               header={<span><BookOutlined /> 章节 ({chapters.length})</span>} 
               key="chapters"
             >
-              {chapters.map((chapter) => (
+              {chapters.length > 0 ? chapters.map((chapter) => (
                 <Card 
                   key={chapter.id}
                   size="small"
@@ -221,7 +234,9 @@ const WorkspacePage = () => {
                     </Space>
                   </div>
                 </Card>
-              ))}
+              )) : (
+                <Text type="secondary" style={{ padding: '8px 0' }}>暂无章节，请先规划章节</Text>
+              )}
             </Panel>
             
             {/* 故事设定 */}
@@ -232,17 +247,18 @@ const WorkspacePage = () => {
             >
               {storyBible ? (
                 <div>
-                  <div style={{ marginBottom: 8 }}><Text strong>类型：</Text>{storyBible.genre}</div>
+                  <div style={{ marginBottom: 8 }}><Text strong>类型：</Text>{storyBible.genre || '待填充'}</div>
                   <div style={{ marginBottom: 8 }}><Text strong>主题：</Text>{storyBible.theme || '待填充'}</div>
                   <div style={{ marginBottom: 8 }}><Text strong>基调：</Text>{storyBible.tone || '待填充'}</div>
-                  {storyBible.synopsis && (
+                  <div style={{ marginBottom: 8 }}><Text strong>目标读者：</Text>{storyBible.target_audience || '待填充'}</div>
+                  {storyBible.synopsis ? (
                     <div>
                       <Text strong>概述：</Text>
                       <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
                         {storyBible.synopsis.slice(0, 100)}...
                       </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 <Text type="secondary">暂无故事设定</Text>
@@ -259,21 +275,19 @@ const WorkspacePage = () => {
                 </Button>
               }
             >
-              {characters.length > 0 ? (
-                characters.map((char: any) => (
-                  <Card key={char.id} size="small" style={{ marginBottom: 8 }}>
-                    <Text strong>{char.name}</Text>
-                    <Tag color={char.role_type === 'protagonist' ? 'blue' : 'default'} style={{ marginLeft: 8, fontSize: 10 }}>
-                      {char.role_type === 'protagonist' ? '主角' : char.role_type}
-                    </Tag>
-                    {char.profile && (
-                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                        {char.profile.slice(0, 50)}...
-                      </div>
-                    )}
-                  </Card>
-                ))
-              ) : (
+              {characters.length > 0 ? characters.map((char: any) => (
+                <Card key={char.id} size="small" style={{ marginBottom: 8 }}>
+                  <Text strong>{char.name}</Text>
+                  <Tag color={char.role_type === 'protagonist' ? 'blue' : 'default'} style={{ marginLeft: 8, fontSize: 10 }}>
+                    {getRoleLabel(char.role_type)}
+                  </Tag>
+                  {char.profile && (
+                    <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                      {char.profile.slice(0, 50)}...
+                    </div>
+                  )}
+                </Card>
+              )) : (
                 <Text type="secondary">暂无角色</Text>
               )}
             </Panel>

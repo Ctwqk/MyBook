@@ -40,7 +40,12 @@ const ProjectListPage = () => {
       setCreateModalVisible(false)
       form.resetFields()
       message.success('创建成功')
-      loadProjects()
+      // 导航到项目工作台
+      if (res.data?.id) {
+        navigate(`/projects/${res.data.id}`)
+      } else {
+        loadProjects()
+      }
     } catch (err) {
       message.error('创建失败')
     }

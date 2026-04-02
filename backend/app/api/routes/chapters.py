@@ -157,11 +157,15 @@ async def generate_chapter_text(
     
     result = await writer.generate_chapter(project_id, chapter_id, request)
     
+    # WriterOutput 是 Pydantic 模型，提取属性
+    draft_blob = result.draft_blob if hasattr(result, 'draft_blob') else str(result)
+    word_count = len(draft_blob) // 2
+    
     return {
         "chapter_id": chapter_id,
-        "text": result["text"],
-        "word_count": result["word_count"],
-        "summary": result.get("summary")
+        "text": draft_blob,
+        "word_count": word_count,
+        "summary": result.chapter_summary if hasattr(result, 'chapter_summary') else None
     }
 
 

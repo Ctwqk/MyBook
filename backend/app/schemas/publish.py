@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.publish_task import PublishErrorCode, PublishMode, PublishStatus
 
@@ -65,14 +65,30 @@ class PublishTaskResponse(BaseModel):
     platform: str
     account_id: Optional[str]
     remote_book_id: Optional[str]
-    mode: PublishMode
-    status: PublishStatus
-    error_code: Optional[PublishErrorCode]
+    mode: str  # 使用str而非Enum以避免序列化问题
+    status: str  # 使用str而非Enum以避免序列化问题
+    error_code: Optional[str]  # 使用str而非Enum以避免序列化问题
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+    
+    @field_validator('mode', 'status', mode='before')
+    @classmethod
+    def convert_enum_to_str(cls, v):
+        if hasattr(v, 'value'):
+            return v.value
+        return str(v) if v is not None else None
+    
+    @field_validator('error_code', mode='before')
+    @classmethod
+    def convert_error_code(cls, v):
+        if v is None:
+            return None
+        if hasattr(v, 'value'):
+            return v.value
+        return str(v)
 
 
 class PublishTaskListResponse(BaseModel):

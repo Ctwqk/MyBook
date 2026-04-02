@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.session import engine, Base
-from app.api.routes import projects, chapters, memory, publish, platform, arc_envelopes
+from app.api.routes import projects, chapters, memory, publish, platform, arc_envelopes, orchestrator, audience
 
 
 @asynccontextmanager
@@ -26,7 +26,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="MyBook - 长篇网文生成系统",
         description="一个模块化的长篇网文写作系统工程",
-        version="0.1.0",
+        version="2.5.0",
         lifespan=lifespan
     )
     
@@ -46,11 +46,13 @@ def create_app() -> FastAPI:
     app.include_router(publish.router)
     app.include_router(platform.router)
     app.include_router(arc_envelopes.router)
+    app.include_router(orchestrator.router)
+    app.include_router(audience.router)
     
     # 健康检查
     @app.get("/health")
     async def health_check():
-        return {"status": "healthy", "version": "0.1.0"}
+        return {"status": "healthy", "version": "2.5.0"}
     
     return app
 

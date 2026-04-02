@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.publish_task import PublishTask
 from app.schemas.publish import (
     PlatformAccountRegister,
     PlatformAccountResponse,
@@ -162,6 +163,3 @@ async def cancel_publish_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-
-from app.models.publish_task import PublishTask

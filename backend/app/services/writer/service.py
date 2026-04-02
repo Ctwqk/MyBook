@@ -57,6 +57,11 @@ class WriterService:
         (r'<[\s\S]*?<\/[\s\S]*?>', ''),
     ]
 
+    # Scene continuation 配置
+    MAX_SCENE_OUTPUT_TOKENS = 4000  # 单次输出上限
+    MIN_SCENE_OUTPUT_TOKENS = 1500  # 最小输出，判断是否被截断
+    MAX_CONTINUATION_PASSES = 3    # 最大续写次数
+
     def __init__(
         self,
         db: AsyncSession,
@@ -220,7 +225,11 @@ class WriterService:
         total_scenes: int = 2,
         target_word_count: int = 3000
     ) -> SceneOutput:
-        """生成单个 scene"""
+        """
+        生成单个 scene - v2.3 Scene Continuation 支持
+        
+        自动检测输出是否被截断，若是则自动续写直到完整
+        """
         system_prompt = """你是一个专业的小说写作助手。
         你的任务是创作指定 scene 的正文内容。"""
         
@@ -240,15 +249,157 @@ class WriterService:
             target_words=target_words
         )
         
+        # 首次生成
         response = await self._call_llm_with_retry(prompt, system_prompt)
         text = self._clean_text(response.content)
+        
+        # Scene Continuation: 检测是否需要续写
+        if self._needs_continuation(text):
+            continuation_pass = 0
+            last_ending = text
+            
+            while self._needs_continuation(last_ending) and continuation_pass < self.MAX_CONTINUATION_PASSES:
+                continuation_pass += 1
+                
+                # 续写提示
+                continuation_text = await self._continue_scene(
+                    chapter, scene_plan, last_ending, continuation_pass
+                )
+                
+                if continuation_text:
+                    last_ending = last_ending + "\n\n" + continuation_text
+                else:
+                    break
+            
+            text = last_ending
         
         return SceneOutput(
             scene_no=scene_plan.scene_no,
             scene_objective=scene_plan.scene_objective,
             text_blob=text,
-            micro_summary=text[:100] + "..." if len(text) > 100 else text
+            micro_summary=text[:100] + "..." if len(text) > 100 else text,
+            state_hints=[]  # 可后续扩展
         )
+
+    def _needs_continuation(self, text: str) -> bool:
+        """
+        检测文本是否被截断，需要续写
+        
+        判断依据：
+        1. 文本长度低于最小阈值 - 可能被截断
+        2. 文本以不完整的句子结束（无句号、问号、感叹号、省略号）
+        3. 文本以逗号、顿号等中间标点结束
+        """
+        if not text:
+            return False
+        
+        # 检查是否为空或过短
+        estimated_tokens = len(text) // 4  # 粗略估算
+        if estimated_tokens < self.MIN_SCENE_OUTPUT_TOKENS:
+            return True
+        
+        # 检查结尾是否完整
+        text = text.strip()
+        if not text:
+            return False
+        
+        last_char = text[-1]
+        incomplete_endings = ['，', '、', '：', ';', ':', '-', '(', '（', '"', '"', ''', ''']
+        
+        # 以不完整标点结尾
+        if last_char in incomplete_endings:
+            return True
+        
+        # 以字母/数字结尾但不是完整句子
+        if last_char.isalpha() or last_char.isdigit():
+            # 检查最后50个字符是否看起来像被截断
+            last_segment = text[-50:].strip()
+            if last_segment and not any(last_segment.endswith(end) for end in ['。', '！', '？', '..."', '"', ''', ''', '。', '！', '？']):
+                # 检查是否有动词但没有结尾
+                if any(word in last_segment.lower() for word in ['and', 'was', 'were', 'is', 'are', 'be', 'to', 'that', 'he', 'she', 'it', 'they']):
+                    return True
+        
+        return False
+
+    async def _continue_scene(
+        self,
+        chapter: Chapter,
+        scene_plan: ScenePlan,
+        existing_text: str,
+        pass_number: int
+    ) -> str:
+        """
+        续写 scene - Scene Continuation 核心实现
+        
+        在已有内容基础上继续生成，直到 scene 完整
+        """
+        system_prompt = """你是一个专业的小说写作助手。
+        你的任务是继续之前的 scene 内容，保持连贯性。"""
+        
+        # 获取最后一段的结尾作为续写起点
+        last_paragraph = existing_text[-500:] if len(existing_text) > 500 else existing_text
+        
+        prompt = f"""继续以下 scene 的内容，保持文风、语气和节奏的一致性：
+
+【Scene {scene_plan.scene_no} 目标】
+{scene_plan.scene_objective}
+
+【现有内容结尾】
+{last_paragraph}
+
+请继续写作，保持：
+1. 相同的人物、场景、时间
+2. 相同的叙事语气和风格
+3. 情节的自然延续
+4. 如果 scene 已接近完成，自然收尾
+
+只需输出续写内容，无需额外说明。
+"""
+        
+        try:
+            response = await self._call_llm_with_retry(prompt, system_prompt)
+            continuation = self._clean_text(response.content)
+            
+            # 验证续写质量：不能是重复内容
+            if self._is_repetitive_continuation(existing_text, continuation):
+                return ""  # 返回空字符串表示续写失败或无效
+            
+            return continuation
+            
+        except Exception:
+            return ""
+
+    def _is_repetitive_continuation(self, existing: str, new: str) -> bool:
+        """
+        检测续写内容是否重复
+        
+        检查新内容开头是否与已有内容末尾过于相似
+        """
+        if not existing or not new:
+            return False
+        
+        # 获取已有内容的最后100字符和新内容的前100字符
+        existing_end = existing[-100:].lower().strip()
+        new_start = new[:100].lower().strip()
+        
+        # 简单的单词重叠检测
+        existing_words = set(existing_end.split())
+        new_words = set(new_start.split())
+        
+        # 过滤停用词
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', '的', '了', '是', '在', '和', '与', '或', '但', '而', '着', '过', '有', '个', '我', '你', '他', '她', '它', '们', '这', '那', '什', '么'}
+        existing_words -= stop_words
+        new_words -= stop_words
+        
+        if not existing_words or not new_words:
+            return False
+        
+        # 计算重叠率
+        overlap = len(existing_words & new_words)
+        overlap_rate = overlap / min(len(existing_words), len(new_words)) if min(len(existing_words), len(new_words)) > 0 else 0
+        
+        # 如果重叠率超过 60%，认为是重复续写
+        return overlap_rate > 0.6
 
     async def _stitch_scenes(
         self,

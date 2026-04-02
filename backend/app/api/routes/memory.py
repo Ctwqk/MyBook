@@ -26,15 +26,20 @@ async def get_story_bible(
     project_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """获取 Story Bible"""
+    """获取 Story Bible - 如果不存在则自动创建空记录"""
     service = MemoryService(db)
     bible = await service.get_story_bible(project_id)
     
+    # 如果不存在，自动创建空记录
     if not bible:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Story Bible for project {project_id} not found"
-        )
+        bible = await service.update_story_bible(project_id, {
+            "title": "",
+            "genre": "",
+            "theme": "",
+            "synopsis": "",
+            "tone": "",
+            "target_audience": "",
+        })
     
     return bible
 

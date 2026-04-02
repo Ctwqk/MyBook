@@ -22,6 +22,7 @@ from app.services.orchestrator.schemas import (
     Task, TaskStatus, OperationMode, RetryPolicy,
     WriterOutput, ReviewVerdictV2, StateUpdateResult
 )
+from app.services.writer.service import WriterService
 
 
 class OrchestratorService:
@@ -55,6 +56,11 @@ class OrchestratorService:
         
         # 任务队列（内存中，生产环境应使用 Redis）
         self._task_queue: dict[int, list[Task]] = {}  # project_id -> tasks
+        
+        # 运行时模式（可动态切换）
+        self._operation_mode = operation_mode
+        self._mode_lock = asyncio.Lock()  # 模式切换锁
+
 
     # ==================== 多项目隔离 ====================
 
@@ -205,11 +211,23 @@ class OrchestratorService:
         }
 
     async def _generate_chapter(self, project_id: int, chapter_id: int) -> WriterOutput:
-        """生成章节"""
+        """生成章节 - v2.3 checkpoint 集成"""
         # 项目隔离检查
         chapter = await self.chapter_repo.get(chapter_id)
         if not chapter or chapter.project_id != project_id:
             raise ValueError(f"Chapter {chapter_id} not found in project {project_id}")
+        
+        # 创建内部任务用于 checkpoint
+        task = Task(
+            task_id=f"{project_id}_generate_{chapter_id}_{datetime.now().timestamp()}",
+            project_id=project_id,
+            task_type="generate",
+            chapter_id=chapter_id,
+            status=TaskStatus.IN_PROGRESS
+        )
+        
+        # CHECKPOINT: 生成前等待人工确认（CHECKPOINT 模式下）
+        await self.checkpoint_wait(task)
         
         # Writer 生成
         writer_request = self.writer_service.generate_chapter(
@@ -219,11 +237,23 @@ class OrchestratorService:
         return await writer_request
 
     async def _review_chapter(self, project_id: int, chapter_id: int) -> ReviewVerdictV2:
-        """审查章节"""
+        """审查章节 - v2.3 checkpoint 集成"""
         # 项目隔离检查
         chapter = await self.chapter_repo.get(chapter_id)
         if not chapter or chapter.project_id != project_id:
             raise ValueError(f"Chapter {chapter_id} not found in project {project_id}")
+        
+        # 创建内部任务用于 checkpoint
+        task = Task(
+            task_id=f"{project_id}_review_{chapter_id}_{datetime.now().timestamp()}",
+            project_id=project_id,
+            task_type="review",
+            chapter_id=chapter_id,
+            status=TaskStatus.IN_PROGRESS
+        )
+        
+        # CHECKPOINT: 审查前等待人工确认（CHECKPOINT 模式下）
+        await self.checkpoint_wait(task)
         
         # Reviewer 审查
         verdict = await self.reviewer_service.review_chapter(
@@ -272,11 +302,66 @@ class OrchestratorService:
         
         return {"project_id": project_id, "action": "replan"}
 
+    # ==================== 运行时模式切换 ====================
+
+    @property
+    def operation_mode(self) -> OperationMode:
+        """获取当前运行模式"""
+        return self._operation_mode
+    
+    async def set_operation_mode(self, mode: OperationMode) -> dict[str, Any]:
+        """
+        运行时切换操作模式
+        
+        支持三种模式：
+        - BLACKBOX: 完全黑箱，无需人工干预
+        - CHECKPOINT: 关键节点等待人工确认
+        - COLLABORATIVE: 共驾编辑模式
+        
+        Returns:
+            切换前后的模式信息
+        """
+        async with self._mode_lock:
+            old_mode = self._operation_mode
+            self._operation_mode = mode
+            
+            # 同步更新子服务
+            self.writer_service.operation_mode = mode
+            self.reviewer_service.operation_mode = mode
+            
+            return {
+                "success": True,
+                "old_mode": old_mode.value,
+                "new_mode": mode.value,
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    async def get_operation_mode_info(self) -> dict[str, Any]:
+        """获取当前模式详细信息"""
+        return {
+            "current_mode": self._operation_mode.value,
+            "mode_description": self._get_mode_description(self._operation_mode),
+            "checkpoint_enabled": self._operation_mode == OperationMode.CHECKPOINT,
+            "auto_retry_enabled": self._operation_mode in [
+                OperationMode.BLACKBOX, 
+                OperationMode.CHECKPOINT
+            ]
+        }
+    
+    def _get_mode_description(self, mode: OperationMode) -> str:
+        """获取模式描述"""
+        descriptions = {
+            OperationMode.BLACKBOX: "完全黑箱模式：所有任务自动执行，无需人工干预。失败时自动降级处理。",
+            OperationMode.CHECKPOINT: "检查点模式：关键节点暂停等待人工确认后继续执行。",
+            OperationMode.COLLABORATIVE: "共驾编辑模式：人机协作，实时反馈与调整。"
+        }
+        return descriptions.get(mode, "未知模式")
+
     # ==================== 人工介入点 ====================
 
     async def checkpoint_wait(self, task: Task) -> None:
         """检查点等待人工确认"""
-        if self.operation_mode == OperationMode.BLACKBOX:
+        if self._operation_mode == OperationMode.BLACKBOX:
             return  # 黑箱模式跳过
         
         # 检查点模式：暂停等待确认
