@@ -248,7 +248,7 @@ async def patch_chapter_segment(
 
 # ==================== 审查相关 API ====================
 
-@router.post("/{chapter_id}/review", response_model=ReviewResponse)
+@router.post("/{chapter_id}/review")
 async def review_chapter(
     project_id: int,
     chapter_id: int,
@@ -270,8 +270,15 @@ async def review_chapter(
         request = ReviewRequest()
     
     result = await reviewer.review_chapter(project_id, chapter_id, request)
-    
-    return result
+
+    return {
+        "chapter_id": chapter_id,
+        "verdict": result.verdict,
+        "verdict_reason": result.verdict_reason,
+        "issues": result.issues,
+        "scores": result.scores,
+        "review_notes": []
+    }
 
 
 @router.post("/{chapter_id}/review/partial", response_model=ReviewResponse)

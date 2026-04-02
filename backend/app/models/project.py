@@ -27,6 +27,9 @@ class Project(Base):
     style: Mapped[str] = mapped_column(String(100), nullable=True)
     premise: Mapped[str] = mapped_column(Text, nullable=True)
     target_length: Mapped[int] = mapped_column(Integer, nullable=True)  # 目标字数
+    target_chapters: Mapped[int] = mapped_column(Integer, nullable=True)  # 目标章节数
+    chapter_length: Mapped[int] = mapped_column(Integer, nullable=True)  # 每章节字数
+    raw_prompt: Mapped[str] = mapped_column(Text, nullable=True)  # 原始 Prompt
     status: Mapped[ProjectStatus] = mapped_column(
         Enum(ProjectStatus),
         default=ProjectStatus.DRAFT,
@@ -69,6 +72,9 @@ class Project(Base):
     publish_tasks: Mapped[list["PublishTask"]] = relationship(
         "PublishTask", back_populates="project", cascade="all, delete-orphan"
     )
+    arc_envelopes: Mapped[list["ArcEnvelope"]] = relationship(
+        "ArcEnvelope", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 # Forward reference for type hints
@@ -80,3 +86,4 @@ from app.models.story_bible import StoryBible
 from app.models.foreshadow_record import ForeshadowRecord
 from app.models.review_note import ReviewNote
 from app.models.publish_task import PublishTask
+from app.models.arc_envelope import ArcEnvelope

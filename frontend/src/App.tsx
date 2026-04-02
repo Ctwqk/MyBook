@@ -4,6 +4,7 @@ import ProjectListPage from './pages/ProjectListPage'
 import WorkspacePage from './pages/WorkspacePage'
 import MemoryPage from './pages/MemoryPage'
 import PublishPage from './pages/PublishPage'
+import AgentPromptsPage from './pages/AgentPromptsPage'
 import Header from './components/Header'
 
 const { Content } = Layout
@@ -21,6 +22,7 @@ function App() {
               <Route path="/projects/:projectId" element={<WorkspacePage />} />
               <Route path="/projects/:projectId/memory" element={<MemoryPage />} />
               <Route path="/projects/:projectId/publish" element={<PublishPage />} />
+              <Route path="/settings/prompts" element={<AgentPromptsPage />} />
             </Routes>
           </div>
         </Content>

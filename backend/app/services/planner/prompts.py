@@ -4,7 +4,7 @@ PREMISE_ANALYSIS_PROMPT = """
 请分析故事前提，提取核心要素。
 
 故事概述：
-{synopsis}
+{premise}
 
 请提取并输出：
 1. 核心主题

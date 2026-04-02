@@ -13,6 +13,9 @@ class ProjectBase(BaseModel):
     style: Optional[str] = Field(None, max_length=100)
     premise: Optional[str] = None
     target_length: Optional[int] = Field(None, ge=0)
+    target_chapters: Optional[int] = Field(None, ge=1)  # 目标章节数
+    chapter_length: Optional[int] = Field(None, ge=500)  # 每章节字数
+    raw_prompt: Optional[str] = None  # 原始 Prompt
 
 
 class ProjectCreate(ProjectBase):
@@ -25,6 +28,9 @@ class ProjectUpdate(BaseModel):
     style: Optional[str] = Field(None, max_length=100)
     premise: Optional[str] = None
     target_length: Optional[int] = Field(None, ge=0)
+    target_chapters: Optional[int] = Field(None, ge=1)
+    chapter_length: Optional[int] = Field(None, ge=500)
+    raw_prompt: Optional[str] = None
     status: Optional[ProjectStatus] = None
 
 

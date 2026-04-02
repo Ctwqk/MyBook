@@ -1,11 +1,16 @@
 import { Link } from 'react-router-dom'
 import { Layout, Menu } from 'antd'
+import { SettingOutlined } from '@ant-design/icons'
 
 const { Header: AntHeader } = Layout
 
 const Header = () => {
   const menuItems = [
     { key: 'projects', label: <Link to="/projects">项目</Link> },
+    { 
+      key: 'settings', 
+      label: <Link to="/settings/prompts"><SettingOutlined /> Prompt 设置</Link> 
+    },
   ]
 
   return (

@@ -1,256 +1,412 @@
-"""Orchestrator 数据模型 - Story Package, Context Pack, Chapter Draft"""
+"""Orchestrator 数据模型 - v2.3 增强版
+
+包含：
+- Scene 模式支持
+- 多项目隔离
+- 错误恢复策略
+- 黑箱/人工双模式
+"""
 from datetime import datetime
-from typing import Optional
+from enum import Enum
+from typing import Optional, Any
 from pydantic import BaseModel, Field
 
 
 # ========================================
-# Story Package - Planner 输出的初始故事包
+# 枚举定义
+# ========================================
+
+class OperationMode(str, Enum):
+    """系统运行模式"""
+    BLACKBOX = "blackbox"       # 完全黑箱，无需人工
+    CHECKPOINT = "checkpoint"   # 检查点模式，关键节点等待确认
+    COLLABORATIVE = "collaborative"  # 共驾编辑模式
+
+
+class TaskStatus(str, Enum):
+    """任务状态"""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_ATTENTION = "needs_attention"
+
+
+class FailureStrategy(str, Enum):
+    """失败策略"""
+    RETRY = "retry"
+    REPAIR = "repair"
+    FALLBACK = "fallback"
+    ESCALATE = "escalate"
+
+
+# ========================================
+# Retry Policy 配置
+# ========================================
+
+class RetryPolicy(BaseModel):
+    """重试策略配置"""
+    max_retries: int = 2
+    max_repairs: int = 1
+    retry_delay_seconds: int = 5
+    exponential_backoff: bool = True
+    
+    # 各阶段重试配置
+    writer_retry_config: dict[str, Any] = Field(default_factory=lambda: {
+        "max_retries": 2,
+        "repair_strategies": ["shorten_context", "reduce_scene_count", "relax_structure"]
+    })
+    reviewer_retry_config: dict[str, Any] = Field(default_factory=lambda: {
+        "max_retries": 2,
+        "repair_strategies": ["strict_parse", "relaxed_parse", "minimal_rule_check"]
+    })
+    updater_retry_config: dict[str, Any] = Field(default_factory=lambda: {
+        "max_retries": 1,
+        "rollback_on_failure": True
+    })
+
+
+# ========================================
+# Scene 模式 - Writer v2.3
+# ========================================
+
+class ScenePlan(BaseModel):
+    """Scene 计划"""
+    scene_no: int
+    scene_objective: str
+    scene_time_point: Optional[str] = None
+    scene_location: Optional[str] = None
+    involved_entities: list[str] = []
+    must_progress_points: list[str] = []
+    micro_hook: Optional[str] = None
+
+
+class SceneOutput(BaseModel):
+    """Scene 生成输出"""
+    scene_no: int
+    scene_objective: str
+    text_blob: str
+    micro_summary: str
+    state_hints: list[dict] = []
+    
+    # 原始 LLM 输出路径（用于调试）
+    raw_response_path: Optional[str] = None
+
+
+class WriterOutput(BaseModel):
+    """Writer 生成输出 - v2.3 增强版
+    
+    包含完整的结构化输出，支持 scene 模式
+    """
+    project_id: int
+    chapter_id: int
+    
+    # 正文内容
+    draft_blob: str  # 完整章节草稿
+    draft_version: int = 1
+    
+    # Scene 模式
+    scene_outputs: list[SceneOutput] = []
+    use_scene_mode: bool = False
+    
+    # 结构化提取
+    chapter_summary: str = ""
+    event_candidates: list[dict] = []
+    state_change_candidates: list[dict] = []
+    thread_beat_candidates: list[dict] = []
+    lore_candidates: list[dict] = []
+    timeline_hints: list[dict] = []
+    
+    # 元数据
+    writer_notes: str = ""
+    generation_meta: dict[str, Any] = Field(default_factory=dict)
+    
+    # 错误恢复
+    parse_success: bool = True
+    parse_error: Optional[str] = None
+    
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class WriterGenerationRequest(BaseModel):
+    """Writer 生成请求 - v2.3"""
+    chapter_id: int
+    outline: Optional[str] = None
+    use_scene_mode: bool = False  # 是否使用 scene 模式
+    scene_count: int = 2  # 默认 2 scenes
+    target_word_count: int = 3000
+    style_hints: Optional[str] = None
+
+
+# ========================================
+# Review Result - v2.3
+# ========================================
+
+class ReviewVerdictV2(BaseModel):
+    """审查判决 - v2.3"""
+    # 总体判定
+    verdict: str = "pass"  # pass/patch_required/rewrite_required/blocked
+    verdict_reason: str = ""
+    
+    # 问题列表
+    issues: list[dict] = []
+    
+    # patch/rewrite instructions
+    patch_instructions: Optional[str] = None
+    rewrite_instructions: Optional[str] = None
+    
+    # 评分
+    scores: dict[str, float] = Field(default_factory=lambda: {
+        "consistency": 1.0,
+        "pacing": 1.0,
+        "hook": 1.0,
+        "overall": 1.0
+    })
+    
+    # 错误恢复
+    parse_success: bool = True
+    parse_error: Optional[str] = None
+    
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class ReviewRequestV2(BaseModel):
+    """审查请求 - v2.3"""
+    chapter_id: int
+    writer_output: Optional[WriterOutput] = None
+    check_types: list[str] = ["consistency", "pacing", "hook"]
+    force_full_review: bool = False
+
+
+# ========================================
+# Task - 多项目隔离
+# ========================================
+
+class Task(BaseModel):
+    """任务 - v2.3 多项目隔离"""
+    task_id: str
+    project_id: int
+    
+    # 任务类型
+    task_type: str  # bootstrap/outline/generate/review/patch/rewrite/replan
+    
+    # 关联 ID
+    chapter_id: Optional[int] = None
+    arc_id: Optional[int] = None
+    volume_id: Optional[int] = None
+    
+    # 状态
+    status: TaskStatus = TaskStatus.PENDING
+    retry_count: int = 0
+    error_message: Optional[str] = None
+    
+    # 优先级
+    priority: int = 0  # 越高越先执行
+    
+    # 时间戳
+    created_at: datetime = Field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    
+    # 错误恢复
+    failure_strategy: FailureStrategy = FailureStrategy.RETRY
+    next_retry_at: Optional[datetime] = None
+
+
+# ========================================
+# State Updater - 事务边界
+# ========================================
+
+class StateUpdateCandidate(BaseModel):
+    """状态更新候选 - 待人工/自动确认"""
+    candidate_id: str
+    project_id: int
+    chapter_id: int
+    
+    # 更新类型
+    update_type: str  # event/state_change/thread_beat/lore/timeline
+    
+    # 更新内容
+    content: dict[str, Any]
+    
+    # 状态
+    status: str = "pending"  # pending/approved/rejected/failed
+    auto_approved: bool = False
+    
+    # 错误信息
+    error_message: Optional[str] = None
+    
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class StateUpdateResult(BaseModel):
+    """状态更新结果"""
+    success: bool
+    applied_candidates: list[str] = []  # 成功应用的 candidate_id
+    rejected_candidates: list[str] = []  # 被拒绝的
+    failed_candidates: list[str] = []  # 失败的
+    
+    # 事务回滚信息
+    rollback_performed: bool = False
+    rollback_reason: Optional[str] = None
+    
+    # 错误信息
+    error_message: Optional[str] = None
+
+
+# ========================================
+# Context Pack - v2.3
+# ========================================
+
+class ContextPackV2(BaseModel):
+    """上下文包 - v2.3"""
+    project_id: int
+    chapter_id: int
+    
+    # 预算控制
+    max_token_budget: int = 128000
+    actual_token_count: int = 0
+    
+    # 内容
+    story_bible: Optional[dict] = None
+    arc_plan: Optional[dict] = None
+    chapter_outline: Optional[dict] = None
+    
+    # 相关内容
+    character_states: list[dict] = []
+    recent_chapters: list[dict] = []
+    active_foreshadows: list[dict] = []
+    relevant_world_settings: list[dict] = []
+    
+    # 警告
+    review_warnings: list[dict] = []
+    
+    # 写作约束
+    style_constraints: list[str] = []
+    word_count_target: int = 3000
+    
+    # 元数据
+    retrieval_sources: list[str] = []  # 从哪些来源检索的
+
+
+# ========================================
+# System Config - v2.3
+# ========================================
+
+class SystemConfigV2(BaseModel):
+    """系统配置 - v2.3"""
+    # 运行模式
+    operation_mode: OperationMode = OperationMode.CHECKPOINT
+    
+    # 重试策略
+    retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
+    
+    # LLM 配置
+    llm_provider: str = "openai"
+    llm_model: str = "MiniMax-M2.7"
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 128000
+    
+    # 调用预算
+    calls_per_hour: int = 300
+    cost_per_1k_tokens: float = 0.01
+    
+    # Writer 配置
+    writer_default_scene_count: int = 2
+    writer_target_word_count: int = 3000
+    writer_max_word_count: int = 4500
+    
+    # Review 配置
+    review_max_attempts: int = 3
+    
+    # 项目隔离
+    enable_project_isolation: bool = True
+
+
+# ========================================
+# 保持向后兼容的旧模型
 # ========================================
 
 class StructuredPremise(BaseModel):
-    """结构化的 premise"""
-    core_conflict: str  # 核心冲突
-    protagonist_goal: str  # 主角目标
-    setting_direction: str  # 设定方向
-    tone_and_style: str  # 基调与风格
-    target_audience: Optional[str] = None  # 目标读者
+    """结构化的 premise - 保持兼容"""
+    core_conflict: str = ""
+    protagonist_goal: str = ""
+    setting_direction: str = ""
+    tone_and_style: str = ""
+    target_audience: Optional[str] = None
 
 
 class StoryBibleDraft(BaseModel):
-    """Story Bible 初稿"""
-    world_rules: list[str] = []  # 世界规则
-    factions: list[dict] = []  # 势力/组织
-    important_locations: list[dict] = []  # 重要地点
-    items_systems: list[dict] = []  # 道具/系统
-    writing_style_constraints: list[str] = []  # 写作风格约束
+    """Story Bible 初稿 - 保持兼容"""
+    world_rules: list[str] = []
+    factions: list[dict] = []
+    important_locations: list[dict] = []
+    items_systems: list[dict] = []
+    writing_style_constraints: list[str] = []
 
 
 class CharacterCardDraft(BaseModel):
-    """角色卡初稿"""
-    name: str
-    role_type: str  # protagonist/antagonist/supporting
-    personality: str
-    motivation: str
+    """角色卡初稿 - 保持兼容"""
+    name: str = ""
+    role_type: str = "supporting"
+    personality: str = ""
+    motivation: str = ""
     secrets: list[str] = []
     relationships: list[dict] = []
 
 
 class ArcPlanDraft(BaseModel):
-    """卷纲初稿"""
-    volume_no: int
-    title: str
-    goal: str  # 本卷目标
-    conflict: str  # 本卷冲突
-    expected_chapter_count: int
+    """卷纲初稿 - 保持兼容"""
+    volume_no: int = 1
+    title: str = ""
+    goal: str = ""
+    conflict: str = ""
+    expected_chapter_count: int = 30
     key_events: list[str] = []
 
 
 class ChapterOutlineDraft(BaseModel):
-    """章纲初稿"""
-    chapter_no: int
-    title: str
-    goal: str  # 本章目标
-    conflict: str  # 本章冲突
-    ending_hook: str  # 章末钩子
+    """章纲初稿 - 保持兼容"""
+    chapter_no: int = 1
+    title: str = ""
+    goal: str = ""
+    conflict: str = ""
+    ending_hook: str = ""
     key_scenes: list[str] = []
 
 
 class StoryPackage(BaseModel):
-    """完整的故事包 - Planner 一次生成的所有内容"""
-    project_id: str
-    structured_premise: StructuredPremise
-    story_bible_draft: StoryBibleDraft
+    """完整的故事包 - 保持兼容"""
+    project_id: int = 0
+    structured_premise: StructuredPremise = Field(default_factory=StructuredPremise)
+    story_bible_draft: StoryBibleDraft = Field(default_factory=StoryBibleDraft)
     character_cards: list[CharacterCardDraft] = []
     arc_plans: list[ArcPlanDraft] = []
     chapter_outlines: list[ChapterOutlineDraft] = []
     created_at: datetime = Field(default_factory=datetime.now)
 
 
-# ========================================
-# Context Pack - Memory 组装的上下文包
-# ========================================
-
-class RelevantWorldSetting(BaseModel):
-    """相关的世界观设定"""
-    category: str
-    name: str
-    content: str
-    importance: str  # critical/major/minor
-
-
-class RelevantCharacterState(BaseModel):
-    """相关角色状态"""
-    character_id: str
-    name: str
-    location: str
-    goal: str
-    emotional_state: str
-    relationship_state: dict = {}  # 与其他角色的关系
-
-
-class RecentChapterSummary(BaseModel):
-    """近期章节摘要"""
-    chapter_no: int
-    title: str
-    summary: str
-    key_events: list[str] = []
-
-
-class ForeshadowInfo(BaseModel):
-    """伏笔信息"""
-    foreshadow_id: str
-    content: str
-    related_entities: list[str] = []
-    status: str  # active/partially_resolved/resolved
-
-
-class ReviewWarning(BaseModel):
-    """审查警告"""
-    chapter_no: Optional[int]
-    issue_type: str
-    description: str
-    severity: str  # critical/major/minor
-
-
-class ContextPack(BaseModel):
-    """Memory 给 Writer/Reviewer 组装的上下文包"""
-    project_id: str
-    chapter_id: str
-    chapter_outline: ChapterOutlineDraft
-    
-    # 相关内容
-    relevant_world_settings: list[RelevantWorldSetting] = []
-    relevant_character_states: list[RelevantCharacterState] = []
-    recent_chapter_memories: list[RecentChapterSummary] = []
-    
-    # 当前进度
-    current_arc_summary: Optional[str] = None
-    current_arc_goal: Optional[str] = None
-    
-    # 伏笔与警告
-    active_foreshadows: list[ForeshadowInfo] = []
-    review_warnings: list[ReviewWarning] = []
-    
-    # 写作约束
-    style_constraints: list[str] = []
-    word_count_target: int = 3000
-
-
-# ========================================
-# Chapter Draft - Writer 生成的章节草稿
-# ========================================
-
-class CharacterStateChange(BaseModel):
-    """角色状态变化"""
-    character_id: str
-    character_name: str
-    changes: dict  # 具体变化
-
-
-class NewWorldDetail(BaseModel):
-    """新世界观细节"""
-    category: str
-    name: str
-    content: str
-    importance: str = "minor"
-
-
-class ForeshadowChange(BaseModel):
-    """伏笔变化"""
-    foreshadow_id: Optional[str]
-    content: str
-    change_type: str  # new/resolved/partially_resolved
-    related_entities: list[str] = []
-
-
 class ChapterDraft(BaseModel):
-    """章节草稿"""
-    project_id: str
-    chapter_id: str
-    outline: ChapterOutlineDraft
+    """章节草稿 - v2.3 scene 支持"""
+    project_id: int = 0
+    chapter_id: int = 0
+    outline: Optional[ChapterOutlineDraft] = None
     
     # 正文内容
-    chapter_text: str
+    chapter_text: str = ""
+    
+    # Scene 模式
+    scene_outputs: list[SceneOutput] = []
+    use_scene_mode: bool = False
     
     # 结构化提取
-    chapter_summary: str  # 章节摘要
-    character_state_changes: list[CharacterStateChange] = []
-    new_world_details: list[NewWorldDetail] = []
-    new_foreshadows: list[ForeshadowChange] = []
-    resolved_foreshadows: list[ForeshadowChange] = []
+    chapter_summary: str = ""
+    event_candidates: list[dict] = []
+    state_change_candidates: list[dict] = []
+    new_foreshadows: list[dict] = []
+    resolved_foreshadows: list[dict] = []
     writer_notes: str = ""
     
     # 元数据
     word_count: int = 0
     created_at: datetime = Field(default_factory=datetime.now)
-
-
-# ========================================
-# Review Result - Reviewer 输出的审查结果
-# ========================================
-
-class IssueItem(BaseModel):
-    """问题项"""
-    issue_type: str  # consistency/pacing/hook/structure
-    location: str  # 位置描述
-    description: str
-    severity: str  # critical/major/minor
-    fix_suggestion: str
-
-
-class ReviewResult(BaseModel):
-    """审查结果"""
-    project_id: str
-    chapter_id: str
-    
-    # 总体判定
-    overall_verdict: str  # pass/patch_required/rewrite_required
-    verdict_reason: str
-    
-    # 问题列表
-    issue_list: list[IssueItem] = []
-    
-    # 详细反馈
-    rewrite_needed: bool = False
-    rewrite_scope: Optional[str] = None  # full_chapter/partial/scenes_only
-    
-    #  rewrite instructions
-    rewrite_instructions: Optional[str] = None
-    
-    # 反馈来源
-    planner_feedback: Optional[str] = None  # 章纲层面的问题
-    memory_feedback: Optional[str] = None  # 记忆一致性问题
-    
-    # 评分
-    consistency_score: float = 1.0  # 一致性 0-1
-    pacing_score: float = 1.0  # 节奏 0-1
-    hook_score: float = 1.0  # 钩子 0-1
-    
-    created_at: datetime = Field(default_factory=datetime.now)
-
-
-# ========================================
-# Writing Session - 写作会话状态
-# ========================================
-
-class WritingSession(BaseModel):
-    """写作会话 - 跟踪整个写作过程"""
-    project_id: str
-    current_arc_id: Optional[str] = None
-    current_chapter_id: Optional[str] = None
-    
-    # 当前状态
-    phase: str = "idle"  # idle/bootstrapping/generating/reviewing/patching/rewriting
-    status: str = "pending"  # pending/in_progress/completed/failed
-    
-    # 审查循环计数
-    review_attempts: int = 0
-    max_review_attempts: int = 3
-    
-    # 最后结果
-    last_result: Optional[ReviewResult] = None
-    error_message: Optional[str] = None
-    
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)

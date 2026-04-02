@@ -44,3 +44,8 @@ class PublishError(MyBookException):
 class MemoryError(MyBookException):
     """记忆错误"""
     pass
+
+
+class BusinessError(MyBookException):
+    """业务错误"""
+    pass

@@ -56,7 +56,36 @@ services:
     depends_on:
       - backend
 
-  # pgvector for vector search (optional)
+  # Redis for caching and locks (optional)
+  # 设计要求：Redis key 必须包含 project namespace
+  # novel:{project_id}:cache:context:{chapter_id}
+  # novel:{project_id}:lock:chapter:{chapter_id}
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: mybook-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+  # MinIO for chapter drafts storage (optional)
+  # 设计要求：路径包含 {project_id}
+  # projects/{project_id}/chapters/{chapter_id}/drafts/v{version}.json
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: mybook-minio
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   volumes:
+  #     - minio_data:/data
+  #   command: server /data --console-address ":9001"
+
+  # Qdrant for vector search (optional)
+  # 设计要求：共享 collection + project_id payload filter
   # qdrant:
   #   image: qdrant/qdrant:latest
   #   container_name: mybook-qdrant
