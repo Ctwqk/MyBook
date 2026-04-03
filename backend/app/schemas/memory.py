@@ -18,7 +18,7 @@ class StoryBibleBase(BaseModel):
     magic_system: Optional[str] = None
     narrative_structure: Optional[dict[str, Any]] = None
     key_plot_points: Optional[list[str]] = None
-    metadata: Optional[dict[str, Any]] = Field(None, validation_alias="meta_data")
+    meta_data: Optional[dict[str, Any]] = None  # 与数据库字段名一致
 
 
 class StoryBibleCreate(StoryBibleBase):
@@ -38,7 +38,7 @@ class StoryBibleUpdate(BaseModel):
     magic_system: Optional[str] = None
     narrative_structure: Optional[dict[str, Any]] = None
     key_plot_points: Optional[list[str]] = None
-    metadata: Optional[dict[str, Any]] = None
+    meta_data: Optional[dict[str, Any]] = None  # 与数据库字段名一致
 
 
 class StoryBibleResponse(StoryBibleBase):
