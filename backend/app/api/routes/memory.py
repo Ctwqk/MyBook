@@ -140,10 +140,31 @@ async def build_context_pack(
     db: AsyncSession = Depends(get_db)
 ):
     """构建上下文包"""
-    service = MemoryService(db)
-    context = await service.build_context_pack(project_id, request)
-    
-    return context
+    try:
+        service = MemoryService(db)
+        context = await service.build_context_pack(project_id, request)
+        
+        # 确保所有字段都是可序列化的
+        return {
+            "story_bible": context.story_bible,
+            "character_states": context.character_states or [],
+            "recent_chapters": context.recent_chapters or [],
+            "foreshadows": context.foreshadows or [],
+            "pending_reviews": context.pending_reviews or [],
+            "formatted_context": context.formatted_context or ""
+        }
+    except Exception as e:
+        # 记录错误并返回空上下文
+        import logging
+        logging.getLogger(__name__).error(f"构建上下文包失败: {e}")
+        return {
+            "story_bible": None,
+            "character_states": [],
+            "recent_chapters": [],
+            "foreshadows": [],
+            "pending_reviews": [],
+            "formatted_context": "上下文构建失败，请稍后重试"
+        }
 
 
 @router.post("/chapter", response_model=ChapterMemoryResponse)
@@ -165,7 +186,7 @@ async def save_chapter_memory(
     return memory
 
 
-@router.get("/foreshadow", response_model=list[ForeshadowRecordResponse])
+@router.get("/foreshadow")
 async def get_foreshadows(
     project_id: int,
     include_resolved: bool = False,
@@ -180,7 +201,22 @@ async def get_foreshadows(
     else:
         foreshadows = await service.get_active_foreshadows(project_id)
     
-    return foreshadows
+    # 转换为可序列化格式
+    result = []
+    for f in foreshadows:
+        result.append({
+            "id": f.id,
+            "project_id": f.project_id,
+            "chapter_id": f.chapter_id,
+            "content": f.content,
+            "related_entities": f.related_entities,
+            "status": f.status.value if hasattr(f.status, 'value') else str(f.status),
+            "planned_resolution": f.planned_resolution,
+            "created_at": f.created_at,
+            "updated_at": f.updated_at
+        })
+    
+    return result
 
 
 @router.post("/foreshadow", response_model=ForeshadowRecordResponse)

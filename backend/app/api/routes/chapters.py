@@ -275,12 +275,22 @@ async def review_chapter(
     
     result = await reviewer.review_chapter(project_id, chapter_id, request)
 
+    # 转换issues为可序列化格式（避免枚举类型序列化问题）
+    issues = []
+    for issue in result.issues:
+        if hasattr(issue, 'model_dump'):
+            issues.append(issue.model_dump())
+        elif isinstance(issue, dict):
+            issues.append(issue)
+        else:
+            issues.append({"description": str(issue)})
+
     return {
         "chapter_id": chapter_id,
         "verdict": result.verdict,
         "verdict_reason": result.verdict_reason,
-        "issues": result.issues,
-        "scores": result.scores,
+        "issues": issues,
+        "scores": result.scores if isinstance(result.scores, dict) else {},
         "review_notes": []
     }
 
