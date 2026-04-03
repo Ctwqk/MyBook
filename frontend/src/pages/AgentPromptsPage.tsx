@@ -49,7 +49,7 @@ const DEFAULT_PROMPTS = {
 }
 
 const AgentPromptsPage = () => {
-  const [prompts, setPrompts] = useState(() => {
+  const [customPrompts, setCustomPrompts] = useState(() => {
     const saved = localStorage.getItem('agent_prompts')
     return saved ? JSON.parse(saved) : DEFAULT_PROMPTS
   })
@@ -59,9 +59,12 @@ const AgentPromptsPage = () => {
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('planner')
 
+  // 根据开关状态决定使用哪个prompt
+  const currentPrompts = useCustomPrompts ? customPrompts : DEFAULT_PROMPTS
+
   const handleSave = () => {
     setSaving(true)
-    localStorage.setItem('agent_prompts', JSON.stringify(prompts))
+    localStorage.setItem('agent_prompts', JSON.stringify(customPrompts))
     localStorage.setItem('use_custom_prompts', String(useCustomPrompts))
     setTimeout(() => {
       setSaving(false)
@@ -70,12 +73,16 @@ const AgentPromptsPage = () => {
   }
 
   const handleReset = () => {
-    setPrompts(DEFAULT_PROMPTS)
+    setCustomPrompts(DEFAULT_PROMPTS)
     message.info('已恢复默认配置')
   }
 
   const updatePrompt = (agent: string, value: string) => {
-    setPrompts((prev: typeof prompts) => ({ ...prev, [agent]: value }))
+    // 如果当前使用默认prompts，切换到自定义模式
+    if (!useCustomPrompts) {
+      setUseCustomPrompts(true)
+    }
+    setCustomPrompts((prev: typeof customPrompts) => ({ ...prev, [agent]: value }))
   }
 
   const agentInfo: Record<string, { title: string; desc: string; color: string }> = {
@@ -153,14 +160,14 @@ const AgentPromptsPage = () => {
               >
                 <TextArea
                   rows={12}
-                  value={prompts[key]}
+                  value={currentPrompts[key]}
                   onChange={e => updatePrompt(key, e.target.value)}
                   style={{ fontFamily: 'monospace' }}
                 />
               </Form.Item>
               <Divider />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                字数: {prompts[key].length} | 
+                字数: {currentPrompts[key].length} | 
                 建议: 100-500 字 | 
                 包含 JSON 输出格式要求可提高稳定性
               </Text>
