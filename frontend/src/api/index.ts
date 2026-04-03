@@ -236,7 +236,11 @@ export const orchestratorApi = {
   getPendingDecisions: (projectId: number) =>
     api.get(`/orchestrator/pending-decisions/${projectId}`),
   approveTask: (taskId: string, decision: { approved: boolean; notes?: string }) =>
-    api.post(`/orchestrator/approve-task`, { task_id: taskId, ...decision }),
+    api.post(`/orchestrator/approve-task`, { task_id: taskId, decision: decision.approved ? 'proceed' : 'reject' }),
+  
+  // 从检查点恢复
+  resumeCheckpoint: (taskId: string) =>
+    api.post(`/orchestrator/checkpoint/${taskId}/resume`),
 }
 
 // ==================== 读者反馈 API ====================

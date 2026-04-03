@@ -12,7 +12,6 @@ from typing import Optional
 import logging
 
 from app.services.orchestrator.schemas import OperationMode
-from app.db.session import DBSession
 
 logger = logging.getLogger(__name__)
 

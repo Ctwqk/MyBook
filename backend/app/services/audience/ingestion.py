@@ -226,3 +226,19 @@ class CommentIngestionService:
         await self.db.flush()
         
         return result.rowcount
+    
+    async def get_comments_by_project(
+        self,
+        project_id: int,
+        limit: int = 100,
+        offset: int = 0
+    ) -> list[RawComment]:
+        """获取项目的所有评论"""
+        result = await self.db.execute(
+            select(RawComment)
+            .where(RawComment.project_id == project_id)
+            .order_by(RawComment.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())

@@ -7,8 +7,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_user
-from app.services.arc_envelope.service import ArcEnvelopeService
+from app.api.deps import get_db
+from app.services.arc_envelope.service import ArcEnvelopeService, ARC_TIER_CONFIGS
 from app.services.arc_envelope.schemas import (
     ArcEnvelopeResponse,
     ArcEnvelopePreviewResponse,
@@ -29,7 +29,6 @@ def get_arc_service(db: AsyncSession = Depends(get_db)) -> ArcEnvelopeService:
 async def get_project_tier(
     project_id: int,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> TierInfoResponse:
     """
     获取项目的分档信息
@@ -37,7 +36,7 @@ async def get_project_tier(
     根据全书总章节数确定分档（short/medium/long/ultra_long）
     """
     tier = await service.get_tier_for_project(project_id)
-    config = service.ARC_TIER_CONFIGS.get(tier)
+    config = ARC_TIER_CONFIGS.get(tier)
     
     if not config:
         raise HTTPException(status_code=500, detail="Invalid tier configuration")
@@ -57,7 +56,6 @@ async def preview_project_arcs(
     project_id: int,
     total_chapters: Optional[int] = None,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> list[ArcEnvelopePreviewResponse]:
     """
     预览项目中所有 arc 的 envelope
@@ -87,7 +85,6 @@ async def activate_arc(
     project_id: int,
     request: ActivateArcRequest,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> ArcEnvelopeResponse:
     """
     激活一个 arc - 执行完整的三层决定 + Provisional 预演
@@ -129,7 +126,6 @@ async def get_arc_envelope(
     project_id: int,
     arc_no: int,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> ArcEnvelopeResponse:
     """获取指定 arc 的 envelope"""
     envelope = await service.get_arc_envelope(project_id, arc_no)
@@ -168,7 +164,6 @@ async def get_arc_envelope(
 async def get_project_arcs(
     project_id: int,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> list[ArcEnvelopeResponse]:
     """获取项目的所有 arc envelopes"""
     envelopes = await service.get_project_arcs(project_id)
@@ -206,7 +201,6 @@ async def adjust_arc_envelope(
     arc_no: int,
     request: ArcAdjustmentRequest,
     service: ArcEnvelopeService = Depends(get_arc_service),
-    current_user: dict = Depends(get_current_user),
 ) -> ArcEnvelopeResponse:
     """
     运行时调整 arc envelope

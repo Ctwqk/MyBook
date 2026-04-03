@@ -349,3 +349,148 @@ async def get_aggregated_feedback(
     except Exception as e:
         logger.error(f"Get aggregated feedback failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class FeedbackSubmitRequest(BaseModel):
+    """反馈提交请求"""
+    feedback_type: str
+    content: str
+    rating: Optional[int] = None
+    chapter_id: Optional[int] = None
+
+
+@router.post("/feedback/{project_id}")
+async def submit_feedback(
+    project_id: int,
+    request: FeedbackSubmitRequest,
+    db=Depends(get_db)
+):
+    """
+    提交读者反馈
+    
+    直接摄入一条反馈（不经过评论分析流程）
+    """
+    try:
+        ingestion = CommentIngestionService(db)
+        comment_data = CommentIngestRequest(
+            project_id=project_id,
+            platform="manual",  # 手动提交标记
+            chapter_id=request.chapter_id,
+            user_hash="manual_user",  # 占位
+            content=request.content,
+            like_count=0,
+            reply_count=0
+        )
+        comment = await ingestion.ingest_comment(comment_data)
+        await db.commit()
+        return {"success": True, "comment_id": comment.id}
+    except Exception as e:
+        logger.error(f"Submit feedback failed: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analysis/{project_id}")
+async def get_analysis_summary(
+    project_id: int,
+    db=Depends(get_db)
+):
+    """
+    获取分析摘要
+    
+    返回项目的整体分析状态和统计
+    """
+    try:
+        ingestion = CommentIngestionService(db)
+        aggregator = FeedbackAggregatorService(db)
+        
+        # 获取评论统计
+        stats = await ingestion.get_comment_stats(project_id)
+        
+        # 获取信号统计
+        signals = await aggregator.aggregate_signals(project_id, WindowType.WINDOW_A)
+        
+        # 获取高置信度告警
+        alerts = await aggregator.get_high_confidence_alerts(project_id)
+        
+        # 计算平均评分（如果有的话）
+        avg_rating = None
+        if stats.get("avg_like_count"):
+            # 简单转换为 1-5 评分
+            avg_rating = min(5, max(1, stats["avg_like_count"] / 2))
+        
+        return {
+            "project_id": project_id,
+            "comment_count": stats.get("total", 0),
+            "platform_count": stats.get("platform_count", 0),
+            "signal_count": len(signals),
+            "alert_count": len(alerts),
+            "average_rating": avg_rating,
+            "analysis_status": "completed" if stats.get("total", 0) > 0 else "pending",
+            "last_analyzed": stats.get("latest_timestamp")
+        }
+    except Exception as e:
+        logger.error(f"Get analysis summary failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/behavior/{project_id}")
+async def get_behavior_data(
+    project_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db=Depends(get_db)
+):
+    """
+    获取读者行为数据
+    
+    按时间段聚合读者互动数据
+    """
+    try:
+        ingestion = CommentIngestionService(db)
+        
+        # 获取原始评论
+        comments = await ingestion.get_comments_by_project(
+            project_id,
+            limit=1000
+        )
+        
+        # 按时间段聚合
+        behavior_by_day = {}
+        total_likes = 0
+        total_replies = 0
+        
+        for comment in comments:
+            day = comment.created_at.strftime("%Y-%m-%d") if hasattr(comment, 'created_at') else "unknown"
+            if day not in behavior_by_day:
+                behavior_by_day[day] = {
+                    "date": day,
+                    "comment_count": 0,
+                    "total_likes": 0,
+                    "total_replies": 0,
+                    "unique_users": set()
+                }
+            
+            behavior_by_day[day]["comment_count"] += 1
+            behavior_by_day[day]["total_likes"] += comment.like_count or 0
+            behavior_by_day[day]["total_replies"] += comment.reply_count or 0
+            behavior_by_day[day]["unique_users"].add(comment.user_hash)
+            total_likes += comment.like_count or 0
+            total_replies += comment.reply_count or 0
+        
+        # 转换集合为计数
+        for day_data in behavior_by_day.values():
+            day_data["unique_users"] = len(day_data["unique_users"])
+        
+        return {
+            "project_id": project_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_comments": len(comments),
+            "total_likes": total_likes,
+            "total_replies": total_replies,
+            "daily_behavior": list(behavior_by_day.values())
+        }
+    except Exception as e:
+        logger.error(f"Get behavior data failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
