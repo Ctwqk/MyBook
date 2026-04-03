@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Layout, Button, Card, Space, Spin, message, Modal, Form, Input, Select, Collapse, Typography, Tag } from 'antd'
-import { PlusOutlined, EditOutlined, BookOutlined, TeamOutlined } from '@ant-design/icons'
+import { Layout, Button, Card, Space, Spin, message, Modal, Form, Input, InputNumber, Select, Collapse, Typography, Tag, Dropdown, type MenuProps } from 'antd'
+import { PlusOutlined, EditOutlined, BookOutlined, TeamOutlined, MoreOutlined, ReloadOutlined, ThunderboltOutlined, FileTextOutlined } from '@ant-design/icons'
 import { projectApi, chapterApi, memoryApi } from '../api'
 import { useProjectStore } from '../store/projectStore'
 
@@ -28,13 +28,35 @@ const WorkspacePage = () => {
   const [selectedChapter, setSelectedChapter] = useState<any>(null)
   const [activeTab, setActiveTab] = useState<'content' | 'outline' | 'summary'>('content')
   
+  // 创建角色
   const [createCharModalOpen, setCreateCharModalOpen] = useState(false)
   const [createCharForm] = Form.useForm()
   const [createCharLoading, setCreateCharLoading] = useState(false)
   
+  // 编辑故事设定
   const [editBibleModalOpen, setEditBibleModalOpen] = useState(false)
   const [editBibleForm] = Form.useForm()
   const [editBibleLoading, setEditBibleLoading] = useState(false)
+  
+  // 续写章节
+  const [continueModalOpen, setContinueModalOpen] = useState(false)
+  const [continueForm] = Form.useForm()
+  const [continueLoading, setContinueLoading] = useState(false)
+  
+  // 重写章节
+  const [rewriteModalOpen, setRewriteModalOpen] = useState(false)
+  const [rewriteForm] = Form.useForm()
+  const [rewriteLoading, setRewriteLoading] = useState(false)
+  
+  // 修补章节
+  const [patchModalOpen, setPatchModalOpen] = useState(false)
+  const [patchForm] = Form.useForm()
+  const [patchLoading, setPatchLoading] = useState(false)
+  
+  // 修订大纲
+  const [reviseModalOpen, setReviseModalOpen] = useState(false)
+  const [reviseForm] = Form.useForm()
+  const [reviseLoading, setReviseLoading] = useState(false)
 
   useEffect(() => {
     if (projectId) {
@@ -84,25 +106,113 @@ const WorkspacePage = () => {
     }
   }
 
+  // 生成章节
   const handleGenerateChapter = async (chapterId: number) => {
     try {
+      message.loading({ content: '正在生成章节...', key: 'generate' })
       await chapterApi.generate(Number(projectId), chapterId)
-      message.success('章节生成完成')
+      message.success({ content: '章节生成完成', key: 'generate' })
       loadChapters()
-    } catch (err) {
-      message.error('生成失败')
-    }
-  }
-
-  const handleReviewChapter = async (chapterId: number) => {
-    try {
-      const res = await chapterApi.review(Number(projectId), chapterId)
-      message.success(`审查完成，评分: ${res.data.scores?.overall || res.data.verdict?.score || 'N/A'}`)
+      // 刷新选中章节
+      const updated = chapters.find(c => c.id === chapterId)
+      if (updated) {
+        const chapterRes = await chapterApi.get(Number(projectId), chapterId)
+        setSelectedChapter(chapterRes.data)
+      }
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '审查失败，请重试')
+      message.error({ content: err.response?.data?.detail || '生成失败', key: 'generate' })
     }
   }
 
+  // 续写章节
+  const handleContinueChapter = async () => {
+    try {
+      setContinueLoading(true)
+      const values = await continueForm.validateFields()
+      message.loading({ content: '正在续写...', key: 'continue' })
+      await chapterApi.continue(Number(projectId), selectedChapter.id, {
+        target_word_count: values.target_word_count || 3000
+      })
+      message.success({ content: '续写完成', key: 'continue' })
+      setContinueModalOpen(false)
+      continueForm.resetFields()
+      // 刷新章节
+      const updated = await chapterApi.get(Number(projectId), selectedChapter.id)
+      setSelectedChapter(updated.data)
+      loadChapters()
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || '续写失败')
+    } finally {
+      setContinueLoading(false)
+    }
+  }
+
+  // 重写章节
+  const handleRewriteChapter = async () => {
+    try {
+      setRewriteLoading(true)
+      const values = await rewriteForm.validateFields()
+      message.loading({ content: '正在重写...', key: 'rewrite' })
+      await chapterApi.rewrite(Number(projectId), selectedChapter.id, {
+        rewrite_instructions: values.instructions
+      })
+      message.success({ content: '重写完成', key: 'rewrite' })
+      setRewriteModalOpen(false)
+      rewriteForm.resetFields()
+      // 刷新章节
+      const updated = await chapterApi.get(Number(projectId), selectedChapter.id)
+      setSelectedChapter(updated.data)
+      loadChapters()
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || '重写失败')
+    } finally {
+      setRewriteLoading(false)
+    }
+  }
+
+  // 修补章节
+  const handlePatchChapter = async () => {
+    try {
+      setPatchLoading(true)
+      const values = await patchForm.validateFields()
+      message.loading({ content: '正在修补...', key: 'patch' })
+      await chapterApi.patch(Number(projectId), selectedChapter.id, {
+        segment_id: values.segment_id,
+        segment_content: values.segment_content,
+        patch_instructions: values.patch_instructions
+      })
+      message.success({ content: '修补完成', key: 'patch' })
+      setPatchModalOpen(false)
+      patchForm.resetFields()
+      // 刷新章节
+      const updated = await chapterApi.get(Number(projectId), selectedChapter.id)
+      setSelectedChapter(updated.data)
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || '修补失败')
+    } finally {
+      setPatchLoading(false)
+    }
+  }
+
+  // 修订大纲
+  const handleReviseOutline = async () => {
+    try {
+      setReviseLoading(true)
+      const values = await reviseForm.validateFields()
+      message.loading({ content: '正在修订大纲...', key: 'revise' })
+      await projectApi.reviseOutline(Number(projectId), selectedChapter.id, values.notes)
+      message.success({ content: '大纲修订完成', key: 'revise' })
+      setReviseModalOpen(false)
+      reviseForm.resetFields()
+      loadChapters()
+    } catch (err: any) {
+      message.error(err.response?.data?.detail || '修订失败')
+    } finally {
+      setReviseLoading(false)
+    }
+  }
+
+  // 创建角色
   const handleCreateCharacter = async (values: any) => {
     try {
       setCreateCharLoading(true)
@@ -118,6 +228,7 @@ const WorkspacePage = () => {
     }
   }
 
+  // 编辑故事设定
   const handleEditBible = () => {
     editBibleForm.setFieldsValue({
       title: storyBible?.title || '',
@@ -126,6 +237,8 @@ const WorkspacePage = () => {
       logline: storyBible?.logline || '',
       synopsis: storyBible?.synopsis || '',
       tone: storyBible?.tone || '',
+      target_audience: storyBible?.target_audience || '',
+      world_overview: storyBible?.world_overview || '',
     })
     setEditBibleModalOpen(true)
   }
@@ -166,10 +279,59 @@ const WorkspacePage = () => {
     return labels[status] || status
   }
 
-  // 获取角色类型中文标签
   const getRoleLabel = (roleType: string) => {
     return roleLabels[roleType] || roleType || '未知'
   }
+
+  // 生成/续写/重写下拉菜单
+  const generateDropdownItems = (chapterId: number): MenuProps => ({
+    items: [
+      {
+        key: 'generate',
+        label: '生成正文',
+        icon: <ThunderboltOutlined />,
+        onClick: () => handleGenerateChapter(chapterId)
+      },
+      {
+        key: 'continue',
+        label: '续写章节',
+        icon: <ReloadOutlined />,
+        onClick: () => {
+          setSelectedChapter(chapters.find(c => c.id === chapterId))
+          setContinueModalOpen(true)
+        }
+      },
+      {
+        key: 'rewrite',
+        label: '重写章节',
+        icon: <FileTextOutlined />,
+        onClick: () => {
+          setSelectedChapter(chapters.find(c => c.id === chapterId))
+          setRewriteModalOpen(true)
+        }
+      },
+      { type: 'divider' as const },
+      {
+        key: 'revise',
+        label: '修订大纲',
+        icon: <EditOutlined />,
+        onClick: () => {
+          setSelectedChapter(chapters.find(c => c.id === chapterId))
+          reviseForm.setFieldsValue({ outline: chapters.find(c => c.id === chapterId)?.outline || '' })
+          setReviseModalOpen(true)
+        }
+      },
+      {
+        key: 'patch',
+        label: '修补段落',
+        icon: <EditOutlined />,
+        onClick: () => {
+          setSelectedChapter(chapters.find(c => c.id === chapterId))
+          setPatchModalOpen(true)
+        }
+      },
+    ]
+  })
 
   if (loading) {
     return <Spin size="large" style={{ display: 'flex', justifyContent: 'center', marginTop: 100 }} />
@@ -185,14 +347,18 @@ const WorkspacePage = () => {
           {currentProject?.genre && <Tag color="blue">{currentProject.genre}</Tag>}
         </Space>
         <Space>
-          <Button type="primary" onClick={() => navigate(`/projects/${projectId}/memory`)}>记忆库</Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/memory`)}>记忆库</Button>
           <Button onClick={() => navigate(`/projects/${projectId}/publish`)}>发布</Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/arc`)}>Arc管理</Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/orchestrator`)}>编排器</Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/feedback`)}>读者反馈</Button>
+          <Button onClick={() => navigate(`/projects/${projectId}/platforms`)}>平台账号</Button>
         </Space>
       </Layout.Header>
 
       <Layout>
         <Sider 
-          width={300} 
+          width={320} 
           style={{ background: '#fff', borderRight: '1px solid #e8e8e8', overflow: 'auto' }}
         >
           <Collapse defaultActiveKey={['chapters', 'story', 'characters']} ghost>
@@ -217,7 +383,7 @@ const WorkspacePage = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <Text strong style={{ fontSize: 14 }}>
-                        第{chapter.chapter_no}章
+                        第{chapter.chapter_no}章 {chapter.title && `- ${chapter.title}`}
                       </Text>
                       <div style={{ marginTop: 2 }}>
                         <Tag color={getStatusColor(chapter.status)} style={{ fontSize: 10 }}>
@@ -228,14 +394,26 @@ const WorkspacePage = () => {
                         </Text>
                       </div>
                     </div>
-                    <Space size={4}>
-                      <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleGenerateChapter(chapter.id) }}>生成</Button>
-                      <Button size="small" onClick={(e) => { e.stopPropagation(); handleReviewChapter(chapter.id) }}>审查</Button>
+                    <Space size={2}>
+                      {chapter.status === 'outline' ? (
+                        <Dropdown menu={generateDropdownItems(chapter.id)} trigger={['click']}>
+                          <Button size="small" type="primary" icon={<MoreOutlined />} />
+                        </Dropdown>
+                      ) : (
+                        <>
+                          <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleGenerateChapter(chapter.id) }} style={{ minWidth: 52 }}>生成</Button>
+                          <Dropdown menu={generateDropdownItems(chapter.id)} trigger={['click']}>
+                            <Button size="small" icon={<MoreOutlined />} />
+                          </Dropdown>
+                        </>
+                      )}
                     </Space>
                   </div>
                 </Card>
               )) : (
-                <Text type="secondary" style={{ padding: '8px 0' }}>暂无章节，请先规划章节</Text>
+                <Text type="secondary" style={{ padding: '8px 0', display: 'block' }}>
+                  暂无章节，请先使用"引导"功能生成章节
+                </Text>
               )}
             </Panel>
             
@@ -246,19 +424,19 @@ const WorkspacePage = () => {
               extra={<Button type="link" size="small" icon={<EditOutlined />} onClick={handleEditBible}>编辑</Button>}
             >
               {storyBible ? (
-                <div>
-                  <div style={{ marginBottom: 8 }}><Text strong>类型：</Text>{storyBible.genre || '待填充'}</div>
-                  <div style={{ marginBottom: 8 }}><Text strong>主题：</Text>{storyBible.theme || '待填充'}</div>
-                  <div style={{ marginBottom: 8 }}><Text strong>基调：</Text>{storyBible.tone || '待填充'}</div>
-                  <div style={{ marginBottom: 8 }}><Text strong>目标读者：</Text>{storyBible.target_audience || '待填充'}</div>
-                  {storyBible.synopsis ? (
-                    <div>
+                <div style={{ fontSize: 13 }}>
+                  <div style={{ marginBottom: 6 }}><Text strong>类型：</Text>{storyBible.genre || '待填充'}</div>
+                  <div style={{ marginBottom: 6 }}><Text strong>主题：</Text>{storyBible.theme || '待填充'}</div>
+                  <div style={{ marginBottom: 6 }}><Text strong>基调：</Text>{storyBible.tone || '待填充'}</div>
+                  <div style={{ marginBottom: 6 }}><Text strong>目标读者：</Text>{storyBible.target_audience || '待填充'}</div>
+                  {storyBible.synopsis && (
+                    <div style={{ marginTop: 8 }}>
                       <Text strong>概述：</Text>
-                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                        {storyBible.synopsis.slice(0, 100)}...
+                      <div style={{ color: '#666', marginTop: 2, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {storyBible.synopsis.slice(0, 80)}...
                       </div>
                     </div>
-                  ) : null}
+                  )}
                 </div>
               ) : (
                 <Text type="secondary">暂无故事设定</Text>
@@ -277,13 +455,17 @@ const WorkspacePage = () => {
             >
               {characters.length > 0 ? characters.map((char: any) => (
                 <Card key={char.id} size="small" style={{ marginBottom: 8 }}>
-                  <Text strong>{char.name}</Text>
-                  <Tag color={char.role_type === 'protagonist' ? 'blue' : 'default'} style={{ marginLeft: 8, fontSize: 10 }}>
-                    {getRoleLabel(char.role_type)}
-                  </Tag>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <Text strong>{char.name}</Text>
+                      <Tag color={char.role_type === 'protagonist' ? 'blue' : 'default'} style={{ marginLeft: 8, fontSize: 10 }}>
+                        {getRoleLabel(char.role_type)}
+                      </Tag>
+                    </div>
+                  </div>
                   {char.profile && (
                     <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                      {char.profile.slice(0, 50)}...
+                      {char.profile.slice(0, 60)}...
                     </div>
                   )}
                 </Card>
@@ -300,7 +482,9 @@ const WorkspacePage = () => {
               title={
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Space>
-                    <Text strong style={{ fontSize: 16 }}>第{selectedChapter.chapter_no}章</Text>
+                    <Text strong style={{ fontSize: 16 }}>
+                      第{selectedChapter.chapter_no}章 {selectedChapter.title && `- ${selectedChapter.title}`}
+                    </Text>
                     <Tag color={getStatusColor(selectedChapter.status)}>
                       {getStatusLabel(selectedChapter.status)}
                     </Tag>
@@ -318,6 +502,14 @@ const WorkspacePage = () => {
                     </Button>
                   </Space>
                 </div>
+              }
+              extra={
+                <Space>
+                  <Button type="primary" onClick={() => handleGenerateChapter(selectedChapter.id)}>生成</Button>
+                  <Dropdown menu={generateDropdownItems(selectedChapter.id)} trigger={['click']}>
+                    <Button icon={<MoreOutlined />}>更多</Button>
+                  </Dropdown>
+                </Space>
               }
               style={{ height: 'calc(100vh - 140px)' }}
               bodyStyle={{ height: 'calc(100% - 60px)', overflow: 'auto', padding: 24 }}
@@ -392,6 +584,12 @@ const WorkspacePage = () => {
           <Form.Item name="profile" label="角色简介">
             <Input.TextArea rows={3} placeholder="请输入角色简介" />
           </Form.Item>
+          <Form.Item name="personality" label="性格特点">
+            <Input.TextArea rows={2} placeholder="请输入性格特点" />
+          </Form.Item>
+          <Form.Item name="motivation" label="角色动机">
+            <Input.TextArea rows={2} placeholder="请输入角色动机" />
+          </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => { setCreateCharModalOpen(false); createCharForm.resetFields() }}>取消</Button>
@@ -407,10 +605,10 @@ const WorkspacePage = () => {
         open={editBibleModalOpen}
         onCancel={() => setEditBibleModalOpen(false)}
         footer={null}
-        width={600}
+        width={700}
         destroyOnClose
       >
-        <Form form={editBibleForm} layout="vertical" onFinish={handleUpdateBible}>
+        <Form form={editBibleForm} layout="vertical" onFinish={handleUpdateBible} scrollToFirstError>
           <Form.Item name="title" label="标题">
             <Input placeholder="请输入故事标题" />
           </Form.Item>
@@ -423,14 +621,111 @@ const WorkspacePage = () => {
           <Form.Item name="tone" label="基调">
             <Input.TextArea rows={2} placeholder="请输入故事基调" />
           </Form.Item>
+          <Form.Item name="target_audience" label="目标读者">
+            <Input placeholder="如：18-35岁男性读者" />
+          </Form.Item>
           <Form.Item name="synopsis" label="详细概述">
             <Input.TextArea rows={4} placeholder="请输入故事详细概述" />
+          </Form.Item>
+          <Form.Item name="world_overview" label="世界观概述">
+            <Input.TextArea rows={3} placeholder="请输入世界观概述" />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setEditBibleModalOpen(false)}>取消</Button>
               <Button type="primary" htmlType="submit" loading={editBibleLoading}>保存</Button>
             </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 续写章节弹窗 */}
+      <Modal
+        title="续写章节"
+        open={continueModalOpen}
+        onCancel={() => { setContinueModalOpen(false); continueForm.resetFields() }}
+        footer={[
+          <Button key="cancel" onClick={() => { setContinueModalOpen(false); continueForm.resetFields() }}>取消</Button>,
+          <Button key="submit" type="primary" loading={continueLoading} onClick={handleContinueChapter}>开始续写</Button>
+        ]}
+      >
+        <Form form={continueForm} layout="vertical">
+          <Form.Item name="target_word_count" label="目标续写字数" extra="续写到指定的字数">
+            <InputNumber min={500} max={20000} style={{ width: '100%' }} placeholder="3000" />
+          </Form.Item>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            当前章节字数: {selectedChapter?.word_count || 0} 字
+          </Text>
+        </Form>
+      </Modal>
+
+      {/* 重写章节弹窗 */}
+      <Modal
+        title="重写章节"
+        open={rewriteModalOpen}
+        onCancel={() => { setRewriteModalOpen(false); rewriteForm.resetFields() }}
+        footer={[
+          <Button key="cancel" onClick={() => { setRewriteModalOpen(false); rewriteForm.resetFields() }}>取消</Button>,
+          <Button key="submit" type="primary" loading={rewriteLoading} onClick={handleRewriteChapter}>开始重写</Button>
+        ]}
+      >
+        <Form form={rewriteForm} layout="vertical">
+          <Form.Item name="instructions" label="重写指令" rules={[{ required: true, message: '请输入重写指令' }]}>
+            <Input.TextArea 
+              rows={4} 
+              placeholder="请描述需要如何重写此章节，例如：&#10;- 增强主角的心理描写&#10;- 加快节奏&#10;- 改变结局走向..." 
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 修补章节弹窗 */}
+      <Modal
+        title="修补章节"
+        open={patchModalOpen}
+        onCancel={() => { setPatchModalOpen(false); patchForm.resetFields() }}
+        footer={[
+          <Button key="cancel" onClick={() => { setPatchModalOpen(false); patchForm.resetFields() }}>取消</Button>,
+          <Button key="submit" type="primary" loading={patchLoading} onClick={handlePatchChapter}>开始修补</Button>
+        ]}
+        width={800}
+      >
+        <Form form={patchForm} layout="vertical">
+          <Form.Item name="segment_id" label="段落ID" rules={[{ required: true, message: '请输入段落ID' }]}>
+            <Input placeholder="请输入需要修补的段落ID" />
+          </Form.Item>
+          <Form.Item name="segment_content" label="原始段落内容">
+            <Input.TextArea rows={3} placeholder="请输入原始段落内容（可选）" />
+          </Form.Item>
+          <Form.Item name="patch_instructions" label="修补指令" rules={[{ required: true, message: '请输入修补指令' }]}>
+            <Input.TextArea 
+              rows={4} 
+              placeholder="请描述需要如何修补，例如：&#10;- 修复逻辑矛盾&#10;- 润色语句&#10;- 增强细节描写..." 
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 修订大纲弹窗 */}
+      <Modal
+        title="修订章节大纲"
+        open={reviseModalOpen}
+        onCancel={() => { setReviseModalOpen(false); reviseForm.resetFields() }}
+        footer={[
+          <Button key="cancel" onClick={() => { setReviseModalOpen(false); reviseForm.resetFields() }}>取消</Button>,
+          <Button key="submit" type="primary" loading={reviseLoading} onClick={handleReviseOutline}>提交修订</Button>
+        ]}
+        width={800}
+      >
+        <Form form={reviseForm} layout="vertical">
+          <Form.Item name="outline" label="当前大纲">
+            <Input.TextArea rows={4} placeholder="当前大纲内容" />
+          </Form.Item>
+          <Form.Item name="notes" label="修订说明" rules={[{ required: true, message: '请输入修订说明' }]}>
+            <Input.TextArea 
+              rows={4} 
+              placeholder="请描述需要如何修订大纲，例如：&#10;- 增加一个新的情节点&#10;- 调整章节节奏&#10;- 修改主角的目标..." 
+            />
           </Form.Item>
         </Form>
       </Modal>
