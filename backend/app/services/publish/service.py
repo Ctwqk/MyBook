@@ -214,13 +214,14 @@ class PublishService:
             await self.db.flush()
             
             # 调用 adapter 发布
+            mode_value = request.mode.value if hasattr(request.mode, 'value') else str(request.mode) if request.mode else "immediate"
             result = await adapter.publish_chapter(
                 account_id=request.account_id,
                 book_id=request.remote_book_id,
                 chapter_no=chapter.chapter_no,
                 title=chapter.title or f"第{chapter.chapter_no}章",
                 content=chapter.text,
-                mode=request.mode.value
+                mode=mode_value
             )
             
             if result.get("success"):
