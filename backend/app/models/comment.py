@@ -197,3 +197,191 @@ class AudienceHintPack(Base):
     
     def __repr__(self):
         return f"<AudienceHintPack id={self.id} project={self.project_id} chapter={self.chapter_id}>"
+
+
+# ========================================
+# Phase A: CommentSignalCandidate (v2.6)
+# ========================================
+
+class CommentSignalCandidate(Base):
+    """
+    LLM 解析后的结构化信号候选 - Phase A 新增
+    
+    存储从单条评论中提取的信号，包含：
+    - signal_type: confusion / pacing / character_heat / risk
+    - target_type: character / arc / plot / setting
+    - target_name: 自由文本，如 "主角动机"
+    - severity: 1~4
+    - confidence: 0~1
+    - evidence_span: 原文摘录
+    
+    注意：不替代现有的 CommentSignal，是独立的新表
+    """
+    __tablename__ = "comment_signal_candidates"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    source_comment_id = Column(Integer, ForeignKey("raw_comments.id"), nullable=False, index=True)
+    
+    # 信号类型 (Phase A 只支持 4 种)
+    signal_type = Column(String(20), nullable=False, index=True)  # confusion/pacing/character_heat/risk
+    
+    # 目标类型
+    target_type = Column(String(20), nullable=True, index=True)  # character/arc/plot/setting
+    
+    # 目标名称（自由文本）
+    target_name = Column(String(200), nullable=True)  # 如 "主角动机"
+    
+    # 严重程度 1~4
+    severity = Column(Integer, default=1)
+    
+    # 置信度 0~1
+    confidence = Column(Float, default=0.5)
+    
+    # 原文摘录
+    evidence_span = Column(Text, nullable=True)
+    
+    # 信号级别（Phase A 硬规则分级）
+    signal_level = Column(String(20), default="candidate", index=True)  # noise/candidate/confirmed/watchlist
+    
+    # 来源标记
+    is_llm_generated = Column(Boolean, default=True)  # True=LLM生成, False=关键词匹配fallback
+    is_fallback = Column(Boolean, default=False)     # 是否是 fallback 到关键词的结果
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    
+    def __repr__(self):
+        return f"<CommentSignalCandidate id={self.id} type={self.signal_type} level={self.signal_level}>"
+
+
+# ========================================
+# Phase B: 3 张新表 (v2.7)
+# ========================================
+
+class SignalWindowAggregate(Base):
+    """
+    窗口聚合统计 - Phase B 新增
+    
+    按信号类型和章节窗口聚合统计，用于：
+    - 热点窗口识别
+    - 信号强度趋势
+    - Writer 决策支持
+    
+    字段说明：
+    - signal_key: signal_type:target_type:target_name 的组合键
+    - window_chapter_start/end: 章节窗口范围
+    - hit_comment_count: 命中该信号的评论数
+    - unique_user_count: 去重用户数
+    - total_comment_count: 窗口内总评论数
+    - reader_estimate: 预估受影响读者规模
+    - signal_level: 信号级别 (noise/candidate/confirmed/watchlist)
+    """
+    __tablename__ = "signal_window_aggregates"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    
+    # 信号标识
+    signal_key = Column(String(100), nullable=False, index=True)  # signal_type:target_type:target_name
+    
+    # 窗口范围
+    window_chapter_start = Column(Integer, nullable=False)
+    window_chapter_end = Column(Integer, nullable=False)
+    
+    # 聚合统计
+    hit_comment_count = Column(Integer, default=0)    # 命中该信号的评论数
+    unique_user_count = Column(Integer, default=0)    # 去重用户数
+    total_comment_count = Column(Integer, default=0)   # 窗口内总评论数
+    
+    # 读者规模估算
+    reader_estimate = Column(Integer, nullable=True)   # 预估受影响读者规模
+    
+    # 信号级别
+    signal_level = Column(String(20), default="candidate", index=True)  # noise/candidate/confirmed/watchlist
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    
+    def __repr__(self):
+        return f"<SignalWindowAggregate id={self.id} signal_key={self.signal_key} window={self.window_chapter_start}-{self.window_chapter_end}>"
+
+
+class ReaderScaleSnapshot(Base):
+    """
+    读者规模快照 - Phase B 新增
+    
+    定期记录读者规模估算，用于：
+    - 读者增长趋势
+    - 各章节读者覆盖
+    - 规模分级管理
+    
+    字段说明：
+    - reader_estimate: 读者规模估算值
+    - estimation_method: 估算方法 (sampling/extrapolation/model)
+    - tier: 规模等级 (S/A/B/C/D)
+    """
+    __tablename__ = "reader_scale_snapshots"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    
+    # 章节位置
+    chapter_number = Column(Integer, nullable=False)
+    
+    # 读者规模
+    reader_estimate = Column(Integer, nullable=False)
+    
+    # 估算方法
+    estimation_method = Column(String(50), nullable=True)  # sampling/extrapolation/model
+    
+    # 规模等级
+    tier = Column(String(10), nullable=True, index=True)  # S/A/B/C/D
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    
+    def __repr__(self):
+        return f"<ReaderScaleSnapshot id={self.id} chapter={self.chapter_number} estimate={self.reader_estimate}>"
+
+
+class FeedbackActionRecord(Base):
+    """
+    响应动作记录 (冷却期管理) - Phase B 新增
+    
+    记录 Writer 对信号的响应动作，用于：
+    - 冷却期管理 (避免频繁响应同一信号)
+    - 动作历史追踪
+    - 响应效果评估
+    
+    字段说明：
+    - signal_key: 关联的信号标识
+    - action_type: 动作类型 (adjust/ignore/enhance/investigate)
+    - target: 响应目标 (章节号/角色名等)
+    - cooldown_until: 冷却截止时间
+    """
+    __tablename__ = "feedback_action_records"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    
+    # 信号标识
+    signal_key = Column(String(100), nullable=False, index=True)  # signal_type:target_type:target_name
+    
+    # 动作类型
+    action_type = Column(String(50), nullable=False)  # adjust/ignore/enhance/investigate
+    
+    # 响应目标
+    target = Column(String(200), nullable=True)  # 章节号/角色名等
+    
+    # 章节位置
+    chapter_number = Column(Integer, nullable=True)
+    
+    # 冷却期管理
+    cooldown_until = Column(DateTime, nullable=True, index=True)
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    
+    def __repr__(self):
+        return f"<FeedbackActionRecord id={self.id} action={self.action_type} target={self.target}>"

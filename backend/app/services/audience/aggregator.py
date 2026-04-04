@@ -17,23 +17,28 @@ from app.models.comment import (
 from app.repositories.chapter import ChapterRepository
 
 
-class FeedbackAggregatorService:
+class SignalAggregator:
     """
-    反馈聚合服务 - v2.5
+    信号聚合器 - Phase B 3窗口设计
+    
+    窗口配置：
+    - short: 最近 2~3 章 (窗口大小 3)
+    - medium: 最近 5~10 章 (窗口大小 8)
+    - long: 最近 10~20 章 (窗口大小 20)
     
     核心功能：
     1. 按窗口聚合信号
     2. 计算趋势
     3. 生成 AudienceSignal
-    4. 生成 AudienceHintPack
+    4. 估算读者规模
     """
     
-    # 窗口配置
-    WINDOW_CONFIG = {
-        WindowType.WINDOW_A: 3,   # 3 章
-        WindowType.WINDOW_B: 10,  # 10 章
-        WindowType.WINDOW_C: 20, # 20 章
-    }
+    # Phase B 3窗口配置
+    WINDOWS = [
+        ("short", 3),   # 最近 2~3 章
+        ("medium", 8),  # 最近 5~10 章
+        ("long", 20),   # 最近 10~20 章
+    ]
     
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -42,10 +47,17 @@ class FeedbackAggregatorService:
     async def _get_chapter_range(
         self, 
         project_id: int, 
-        window_type: WindowType
+        window_name: str
     ) -> tuple[int, int]:
         """获取窗口对应的章节范围"""
-        window_size = self.WINDOW_CONFIG.get(window_type, 10)
+        window_size = None
+        for name, size in self.WINDOWS:
+            if name == window_name:
+                window_size = size
+                break
+        
+        if window_size is None:
+            raise ValueError(f"Unknown window: {window_name}")
         
         # 获取最新章节
         result = await self.db.execute(
@@ -58,18 +70,38 @@ class FeedbackAggregatorService:
         
         return start_chapter, latest_chapter
     
-    async def aggregate_signals(
+    def estimate_reader_scale(self, total_comments_in_window: int, comment_to_reader_ratio: int = 100) -> int:
+        """
+        估算读者规模
+        
+        经验系数：1 条评论 ≈ 100 个沉默读者
+        
+        Args:
+            total_comments_in_window: 窗口内评论总数
+            comment_to_reader_ratio: 评论与读者比例，默认 100:1
+        
+        Returns:
+            估算的读者数量
+        """
+        return total_comments_in_window * comment_to_reader_ratio
+    
+    async def aggregate(
         self,
         project_id: int,
-        window_type: WindowType
+        window_name: str = "short"
     ) -> list[AudienceSignal]:
         """
-        聚合信号
+        聚合信号 - 支持 Phase B 3窗口设计
         
-        按窗口类型聚合评论信号，返回 AudienceSignal 列表
+        Args:
+            project_id: 项目 ID
+            window_name: 窗口名称 (short/medium/long)
+        
+        Returns:
+            AudienceSignal 列表
         """
         chapter_start, chapter_end = await self._get_chapter_range(
-            project_id, window_type
+            project_id, window_name
         )
         
         # 查询该窗口内的所有信号
@@ -119,6 +151,10 @@ class FeedbackAggregatorService:
         # 创建 AudienceSignal
         audience_signals = []
         
+        # 估算读者规模
+        total_comments = len(signals)
+        estimated_readers = self.estimate_reader_scale(total_comments)
+        
         for (signal_type, target_type, target_id), agg in aggregated.items():
             signal_count = len(agg['signals'])
             user_count = len(agg['user_hashes'])
@@ -130,12 +166,12 @@ class FeedbackAggregatorService:
             # 简单评分公式
             score = avg_intensity * min(1.0, user_count / 5.0) * avg_confidence
             
-            # 生成证据摘要
-            evidence = f"共{signal_count}条评论，{user_count}位用户反馈"
+            # 生成证据摘要（包含读者规模估算）
+            evidence = f"共{signal_count}条评论，{user_count}位用户反馈，预估{estimated_readers}读者"
             
             audience_signal = AudienceSignal(
                 project_id=project_id,
-                window_type=window_type.value,
+                window_type=window_name,
                 chapter_start=chapter_start,
                 chapter_end=chapter_end,
                 signal_type=signal_type,
@@ -169,9 +205,9 @@ class FeedbackAggregatorService:
         """
         trends = []
         
-        # 获取当前和前一个窗口的分数
-        current_window = WindowType.WINDOW_A
-        previous_window = WindowType.WINDOW_B
+        # 获取 short 和 medium 窗口的分数
+        current_window = "short"
+        previous_window = "medium"
         
         # 查询当前窗口信号
         current_signals = await self._get_signals_for_window(
@@ -200,7 +236,7 @@ class FeedbackAggregatorService:
         # 创建趋势记录
         trend = AudienceTrend(
             project_id=project_id,
-            window_type=current_window.value,
+            window_type=current_window,
             target_type=target_type.value,
             target_id=target_id,
             trend_type=trend_type.value,
@@ -219,19 +255,19 @@ class FeedbackAggregatorService:
     async def _get_signals_for_window(
         self,
         project_id: int,
-        window_type: WindowType,
+        window_name: str,
         target_type: TargetType,
         target_id: Optional[int] = None
     ) -> list[AudienceSignal]:
         """获取指定窗口的信号"""
         chapter_start, chapter_end = await self._get_chapter_range(
-            project_id, window_type
+            project_id, window_name
         )
         
         query = select(AudienceSignal).where(
             and_(
                 AudienceSignal.project_id == project_id,
-                AudienceSignal.window_type == window_type.value,
+                AudienceSignal.window_type == window_name,
                 AudienceSignal.target_type == target_type.value,
                 AudienceSignal.chapter_start >= chapter_start,
                 AudienceSignal.chapter_end <= chapter_end
@@ -302,8 +338,8 @@ class FeedbackAggregatorService:
         # 获取所有窗口的聚合信号
         all_signals = []
         
-        for window_type in [WindowType.WINDOW_A, WindowType.WINDOW_B, WindowType.WINDOW_C]:
-            signals = await self.aggregate_signals(project_id, window_type)
+        for window_name, _ in self.WINDOWS:
+            signals = await self.aggregate(project_id, window_name)
             all_signals.extend(signals)
         
         # 按类型分组
@@ -333,21 +369,25 @@ class FeedbackAggregatorService:
         """
         获取 Pacing Strategist 可用的信号
         """
-        # 只关注 WINDOW_A 和 WINDOW_B
-        window_a_signals = await self.aggregate_signals(project_id, WindowType.WINDOW_A)
-        window_b_signals = await self.aggregate_signals(project_id, WindowType.WINDOW_B)
+        # 只关注 short 和 medium 窗口
+        short_signals = await self.aggregate(project_id, "short")
+        medium_signals = await self.aggregate(project_id, "medium")
         
         # 筛选 pacing 和 risk 类型
         pacing_signals = [
-            s for s in window_a_signals + window_b_signals
+            s for s in short_signals + medium_signals
             if s.signal_type in [SignalType.PACING.value, SignalType.RISK.value]
         ]
         
         return {
             "immediate_signals": [
-                s for s in window_a_signals 
+                s for s in short_signals 
                 if s.signal_type in [SignalType.PACING.value, SignalType.RISK.value]
             ],
             "recent_signals": pacing_signals,
             "high_confidence_alerts": await self.get_high_confidence_alerts(project_id)
         }
+
+
+# 保留旧类名作为别名，保持向后兼容
+FeedbackAggregatorService = SignalAggregator

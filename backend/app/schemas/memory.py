@@ -80,6 +80,7 @@ class ContextPackRequest(BaseModel):
     include_recent_chapters: int = Field(default=3, ge=0, le=10)
     include_foreshadows: bool = True
     include_pending_reviews: bool = False
+    include_reader_feedback: bool = False  # 是否包含读者反馈
 
 
 class ContextPackResponse(BaseModel):
@@ -89,6 +90,7 @@ class ContextPackResponse(BaseModel):
     recent_chapters: list[dict[str, Any]] = []
     foreshadows: list[dict[str, Any]] = []
     pending_reviews: list[dict[str, Any]] = []
+    reader_feedback: Optional[dict] = None  # 读者反馈
     formatted_context: str  # 格式化后的上下文文本
 
 

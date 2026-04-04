@@ -485,6 +485,20 @@ class MemoryService:
                 for n in notes
             ]
         
+        # 6. Reader Feedback (Phase B)
+        reader_feedback = None
+        if request.include_reader_feedback:
+            from app.services.audience.analyzer import ReaderFeedbackView
+            reader_feedback = await ReaderFeedbackView.from_candidates(
+                self.db, project_id, request.chapter_id
+            )
+            feedback_line = f"【读者反馈】 dominant_sentiment: {reader_feedback.dominant_sentiment}"
+            context_parts.append(feedback_line)
+            if reader_feedback.feedback_summary:
+                context_parts.append(f"反馈摘要: {reader_feedback.feedback_summary}")
+            if reader_feedback.highlighted_topics:
+                context_parts.append(f"高亮话题: {', '.join(reader_feedback.highlighted_topics[:5])}")
+        
         # 格式化上下文
         formatted_context = "\n\n".join(context_parts) if context_parts else "暂无上下文"
         
@@ -494,6 +508,7 @@ class MemoryService:
             recent_chapters=recent_chapters,
             foreshadows=foreshadows,
             pending_reviews=pending_reviews,
+            reader_feedback=reader_feedback,
             formatted_context=formatted_context
         )
 

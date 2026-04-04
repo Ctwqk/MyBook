@@ -110,14 +110,30 @@ class WriterService:
             )
         )
         
+        # 获取 Reader Feedback (Phase B)
+        from app.services.audience.analyzer import ReaderFeedbackView
+        reader_feedback = await ReaderFeedbackView.from_candidates(
+            self.db, project_id, chapter_id
+        )
+
+        # 构建 Reader Feedback Section
+        reader_feedback_section = ""
+        if reader_feedback.comment_count > 0:
+            reader_feedback_section = f"""
+【读者反馈】
+- 综合情感: {reader_feedback.dominant_sentiment}
+- 反馈摘要: {reader_feedback.feedback_summary}
+- 高亮话题: {', '.join(reader_feedback.highlighted_topics[:5]) if reader_feedback.highlighted_topics else '暂无'}
+"""
+        
         # 选择生成模式
         if request.use_scene_mode:
             return await self._generate_with_scenes(
-                project_id, chapter, request, context_pack
+                project_id, chapter, request, context_pack, reader_feedback_section
             )
         else:
             return await self._generate_single_pass(
-                project_id, chapter, request, context_pack
+                project_id, chapter, request, context_pack, reader_feedback_section
             )
 
     # ==================== Scene 模式 ====================
@@ -127,14 +143,15 @@ class WriterService:
         project_id: int,
         chapter: Chapter,
         request: WriterGenerationRequest,
-        context_pack: Any
+        context_pack: Any,
+        reader_feedback_section: str = ""
     ) -> WriterOutput:
         """分 scene 生成 + stitch"""
         scene_count = request.scene_count or 2
         
         # Step 1: Scene Breakdown
         scene_plans = await self._breakdown_scenes(
-            chapter, request, context_pack, scene_count
+            chapter, request, context_pack, scene_count, reader_feedback_section
         )
         
         # Step 2: 逐个生成 scenes
@@ -144,7 +161,7 @@ class WriterService:
         for i, plan in enumerate(scene_plans):
             scene_output = await self._generate_single_scene(
                 project_id, chapter, plan, context_pack,
-                previous_ending, i == 0
+                previous_ending, i == 0, reader_feedback_section
             )
             scene_outputs.append(scene_output)
             previous_ending = scene_output.text_blob[-200:] if scene_output.text_blob else ""
@@ -188,7 +205,8 @@ class WriterService:
         chapter: Chapter,
         request: WriterGenerationRequest,
         context_pack: Any,
-        scene_count: int
+        scene_count: int,
+        reader_feedback_section: str = ""
     ) -> list[ScenePlan]:
         """将章节拆分成 scenes"""
         system_prompt = """你是一个专业的小说章节策划师。
@@ -199,7 +217,8 @@ class WriterService:
             title=chapter.title or f"第{chapter.chapter_no}章",
             outline=request.outline or chapter.outline or "待定义",
             context=context_pack.formatted_context,
-            scene_count=scene_count
+            scene_count=scene_count,
+            reader_feedback=reader_feedback_section
         )
         
         response = await self._call_llm_with_retry(prompt, system_prompt)
@@ -222,6 +241,7 @@ class WriterService:
         context_pack: Any,
         previous_ending: str,
         is_first: bool,
+        reader_feedback_section: str = "",
         total_scenes: int = 2,
         target_word_count: int = 3000
     ) -> SceneOutput:
@@ -246,7 +266,8 @@ class WriterService:
             must_progress_points="\n".join([f"- {p}" for p in scene_plan.must_progress_points]) if scene_plan.must_progress_points else "待定",
             micro_hook=scene_plan.micro_hook or "保持悬念",
             previous_scene_ending=previous_ending or "（首个 scene）",
-            target_words=target_words
+            target_words=target_words,
+            reader_feedback=reader_feedback_section
         )
         
         # 首次生成
@@ -434,7 +455,8 @@ class WriterService:
         project_id: int,
         chapter: Chapter,
         request: WriterGenerationRequest,
-        context_pack: Any
+        context_pack: Any,
+        reader_feedback_section: str = ""
     ) -> WriterOutput:
         """单章单次生成（阶段 0.5）"""
         system_prompt = """你是一个专业的小说写作助手。
@@ -445,7 +467,8 @@ class WriterService:
             title=chapter.title or f"第{chapter.chapter_no}章",
             outline=request.outline or chapter.outline or "",
             context=context_pack.formatted_context,
-            style_hints=request.style_hints or ""
+            style_hints=request.style_hints or "",
+            reader_feedback=reader_feedback_section
         )
         
         response = await self._call_llm_with_retry(prompt, system_prompt)

@@ -27,6 +27,8 @@ SCENE_BREAKDOWN_PROMPT = """
 上下文：
 {context}
 
+{reader_feedback}
+
 请输出 {scene_count} 个 scene 的详细计划。
 """
 
@@ -54,6 +56,8 @@ Scene 信息：
 
 前序 scene 结尾：
 {previous_scene_ending}
+
+{reader_feedback}
 
 请创作这个 scene，保持文笔流畅，情节紧凑。
 Scene 目标字数：约 {target_words} 字。
@@ -135,6 +139,8 @@ CHAPTER_GENERATION_PROMPT = """
 
 故事上下文：
 {context}
+
+{reader_feedback}
 
 {style_hints}
 

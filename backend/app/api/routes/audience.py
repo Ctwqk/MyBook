@@ -23,8 +23,10 @@ from app.schemas.comment import (
 )
 from app.services.audience.ingestion import CommentIngestionService
 from app.services.audience.analysis import CommentAnalysisService
+from app.services.audience.analyzer import CommentAnalyzer, ReaderFeedbackView
 from app.services.audience.aggregator import FeedbackAggregatorService
 from app.services.audience.action_mapper import ActionMapperService
+from app.llm.factory import create_llm_provider
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -493,4 +495,329 @@ async def get_behavior_data(
         }
     except Exception as e:
         logger.error(f"Get behavior data failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Phase A: LLM 增强分析 ====================
+
+class LLMAnalyzeResponse(BaseModel):
+    """LLM 分析响应"""
+    processed_comments: int
+    generated_signals: int
+    llm_success: bool
+    fallback_used: bool
+
+
+@router.post("/analyze-llm/{project_id}", response_model=LLMAnalyzeResponse)
+async def analyze_comments_llm(
+    project_id: int,
+    limit: int = 20,
+    db=Depends(get_db)
+):
+    """
+    Phase A: 使用 LLM 批量分析评论
+    
+    调用 LLM 解析评论，提取结构化信号
+    失败时自动 fallback 到关键词匹配
+    
+    Args:
+        project_id: 项目 ID
+        limit: 最多分析的评论数 (默认 20)
+    """
+    try:
+        # 创建 LLM provider
+        llm = create_llm_provider()
+        
+        # 创建分析器
+        analyzer = CommentAnalyzer(db, llm)
+        
+        # 执行分析
+        result = await analyzer.analyze_batch(project_id, limit)
+        
+        await db.commit()
+        
+        return LLMAnalyzeResponse(**result)
+        
+    except Exception as e:
+        logger.error(f"LLM analysis failed: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reader-feedback/{project_id}")
+async def get_reader_feedback(
+    project_id: int,
+    chapter_number: Optional[int] = None,
+    db=Depends(get_db)
+):
+    """
+    Phase A: 获取读者反馈视图
+    
+    返回给 Writer 使用的结构化反馈视图
+    包含：
+    - dominant_sentiment: 综合情感 (如 "risk:confirmed")
+    - feedback_summary: 反馈摘要
+    - highlighted_topics: 高亮话题 (格式: "target_name:signal_type:level")
+    - recent_highlights: 最近高亮评论
+    """
+    try:
+        # 构建 ReaderFeedbackView
+        feedback = await ReaderFeedbackView.from_candidates(
+            db, project_id, chapter_number
+        )
+        
+        return feedback.to_dict()
+        
+    except Exception as e:
+        logger.error(f"Get reader feedback failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/candidates/{project_id}")
+async def get_signal_candidates(
+    project_id: int,
+    signal_type: Optional[str] = None,
+    signal_level: Optional[str] = None,
+    limit: int = 50,
+    db=Depends(get_db)
+):
+    """
+    Phase A: 获取信号候选列表
+    
+    返回 CommentSignalCandidate 列表
+    可按 signal_type 和 signal_level 过滤
+    """
+    try:
+        from app.models.comment import CommentSignalCandidate
+        from sqlalchemy import select
+        
+        query = select(CommentSignalCandidate).where(
+            CommentSignalCandidate.project_id == project_id
+        )
+        
+        if signal_type:
+            query = query.where(CommentSignalCandidate.signal_type == signal_type)
+        
+        if signal_level:
+            query = query.where(CommentSignalCandidate.signal_level == signal_level)
+        
+        query = query.order_by(
+            CommentSignalCandidate.created_at.desc()
+        ).limit(limit)
+        
+        result = await db.execute(query)
+        candidates = list(result.scalars().all())
+        
+        return {
+            "candidates": [
+                {
+                    "id": c.id,
+                    "signal_type": c.signal_type,
+                    "target_type": c.target_type,
+                    "target_name": c.target_name,
+                    "severity": c.severity,
+                    "confidence": c.confidence,
+                    "evidence_span": c.evidence_span,
+                    "signal_level": c.signal_level,
+                    "is_llm_generated": c.is_llm_generated,
+                    "is_fallback": c.is_fallback,
+                    "created_at": c.created_at.isoformat() if c.created_at else None
+                }
+                for c in candidates
+            ],
+            "count": len(candidates)
+        }
+        
+    except Exception as e:
+        logger.error(f"Get signal candidates failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/recalculate-levels/{project_id}")
+async def recalculate_signal_levels(
+    project_id: int,
+    signal_key: Optional[str] = None,
+    db=Depends(get_db)
+):
+    """
+    Phase A: 重新计算信号级别
+    
+    当有更多评论数据时，重新计算信号级别
+    用于窗口聚合后更新级别
+    
+    Args:
+        project_id: 项目 ID
+        signal_key: 可选，格式 "signal_type:target_type:target_name"
+    """
+    try:
+        analyzer = CommentAnalyzer(db)
+        updated = await analyzer.recalculate_signal_levels(project_id, signal_key)
+        
+        await db.commit()
+        
+        return {
+            "success": True,
+            "updated_count": updated
+        }
+        
+    except Exception as e:
+        logger.error(f"Recalculate levels failed: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Phase B: 窗口聚合与冷却期 ====================
+
+class CooldownStatusResponse(BaseModel):
+    """冷却期状态响应"""
+    signal_key: str
+    project_id: int
+    is_in_cooldown: bool
+    cooldown_remaining_seconds: int
+    cooldown_end_time: Optional[str] = None
+    recent_signals_count: int
+    cooldown_threshold: int
+
+
+@router.get("/aggregated/{project_id}")
+async def get_aggregated_signals(
+    project_id: int,
+    window: str = "short",  # short/medium/long
+    db=Depends(get_db)
+):
+    """
+    Phase B: 获取窗口聚合信号
+    
+    按指定窗口类型聚合读者信号
+    
+    Args:
+        project_id: 项目 ID
+        window: 窗口类型 (short/medium/long)
+    """
+    try:
+        service = FeedbackAggregatorService(db)
+        
+        # 映射窗口类型
+        window_map = {
+            "short": WindowType.WINDOW_A,
+            "medium": WindowType.WINDOW_B,
+            "long": WindowType.WINDOW_C
+        }
+        window_type = window_map.get(window.lower(), WindowType.WINDOW_A)
+        
+        # 聚合信号
+        signals = await service.aggregate_signals(project_id, window_type)
+        
+        # 计算聚合统计
+        signal_stats = {}
+        for s in signals:
+            key = f"{s.signal_type}:{s.target_type}:{s.target_id}"
+            if key not in signal_stats:
+                signal_stats[key] = {
+                    "signal_type": s.signal_type,
+                    "target_type": s.target_type,
+                    "target_id": s.target_id,
+                    "total_score": 0.0,
+                    "total_comments": 0,
+                    "total_users": 0,
+                    "max_confidence": 0.0,
+                    "evidence_snippets": []
+                }
+            signal_stats[key]["total_score"] += s.score
+            signal_stats[key]["total_comments"] += s.comment_count
+            signal_stats[key]["total_users"] += s.user_count
+            signal_stats[key]["max_confidence"] = max(
+                signal_stats[key]["max_confidence"],
+                s.confidence
+            )
+            if s.evidence_summary:
+                signal_stats[key]["evidence_snippets"].append(s.evidence_summary[:100])
+        
+        return {
+            "project_id": project_id,
+            "window": window,
+            "window_type": window_type.value,
+            "signals": list(signal_stats.values()),
+            "signal_count": len(signal_stats),
+            "total_signals": len(signals)
+        }
+    except Exception as e:
+        logger.error(f"Get aggregated signals failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cooldown/{project_id}/{signal_key}", response_model=CooldownStatusResponse)
+async def get_cooldown_status(
+    project_id: int,
+    signal_key: str,
+    chapter_number: Optional[int] = None,
+    db=Depends(get_db)
+):
+    """
+    Phase B: 查询冷却期状态
+    
+    检查特定信号是否处于冷却期
+    用于避免对同一信号重复触发动作
+    
+    Args:
+        project_id: 项目 ID
+        signal_key: 信号标识，格式 "signal_type:target_type:target_name"
+        chapter_number: 可选，章节号
+    """
+    try:
+        from datetime import datetime, timedelta
+        from app.models.comment import CommentSignalCandidate
+        
+        # 解析 signal_key
+        parts = signal_key.split(":")
+        if len(parts) < 3:
+            raise ValueError(f"Invalid signal_key format: {signal_key}")
+        
+        signal_type, target_type, target_name = parts[0], parts[1], ":".join(parts[2:])
+        
+        # 查询最近的信号
+        cooldown_threshold = 24  # 小时
+        threshold_time = datetime.utcnow() - timedelta(hours=cooldown_threshold)
+        
+        query = select(CommentSignalCandidate).where(
+            CommentSignalCandidate.project_id == project_id,
+            CommentSignalCandidate.signal_type == signal_type,
+            CommentSignalCandidate.target_type == target_type,
+            CommentSignalCandidate.target_name == target_name,
+            CommentSignalCandidate.created_at >= threshold_time
+        )
+        
+        if chapter_number:
+            query = query.where(CommentSignalCandidate.chapter_number == chapter_number)
+        
+        result = await db.execute(query)
+        recent_signals = list(result.scalars().all())
+        
+        # 计算冷却状态
+        is_in_cooldown = len(recent_signals) >= 3  # 阈值：3个信号
+        cooldown_remaining = 0
+        cooldown_end = None
+        
+        if is_in_cooldown and recent_signals:
+            latest_signal = max(recent_signals, key=lambda x: x.created_at)
+            cooldown_end = latest_signal.created_at + timedelta(hours=cooldown_threshold)
+            remaining_delta = cooldown_end - datetime.utcnow()
+            cooldown_remaining = max(0, int(remaining_delta.total_seconds()))
+            
+            if cooldown_remaining == 0:
+                is_in_cooldown = False
+        
+        return CooldownStatusResponse(
+            signal_key=signal_key,
+            project_id=project_id,
+            is_in_cooldown=is_in_cooldown,
+            cooldown_remaining_seconds=cooldown_remaining,
+            cooldown_end_time=cooldown_end.isoformat() if cooldown_end else None,
+            recent_signals_count=len(recent_signals),
+            cooldown_threshold=cooldown_threshold
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Get cooldown status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
