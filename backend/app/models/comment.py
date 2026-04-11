@@ -223,8 +223,8 @@ class CommentSignalCandidate(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     source_comment_id = Column(Integer, ForeignKey("raw_comments.id"), nullable=False, index=True)
     
-    # 信号类型 (Phase A 只支持 4 种)
-    signal_type = Column(String(20), nullable=False, index=True)  # confusion/pacing/character_heat/risk
+    # 信号类型 (v2.6 完整支持 6 类，Phase A/B 只启用前 4 类)
+    signal_type = Column(String(20), nullable=False, index=True)  # confusion/pacing/character_heat/relationship/prediction/risk
     
     # 目标类型
     target_type = Column(String(20), nullable=True, index=True)  # character/arc/plot/setting

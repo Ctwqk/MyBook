@@ -110,30 +110,40 @@ class WriterService:
             )
         )
         
-        # 获取 Reader Feedback (Phase B)
-        from app.services.audience.analyzer import ReaderFeedbackView
-        reader_feedback = await ReaderFeedbackView.from_candidates(
-            self.db, project_id, chapter_id
-        )
+        # 获取 AudienceHintPack (v2.6 Phase C) - 替代 ReaderFeedbackView
+        from app.services.audience.action_mapper import ActionMapperService
+        action_mapper = ActionMapperService(self.db)
+        hint_pack = await action_mapper.create_hint_pack(project_id, chapter_id)
 
-        # 构建 Reader Feedback Section
-        reader_feedback_section = ""
-        if reader_feedback.comment_count > 0:
-            reader_feedback_section = f"""
-【读者反馈】
-- 综合情感: {reader_feedback.dominant_sentiment}
-- 反馈摘要: {reader_feedback.feedback_summary}
-- 高亮话题: {', '.join(reader_feedback.highlighted_topics[:5]) if reader_feedback.highlighted_topics else '暂无'}
+        # 构建 Audience Hint Section (不暴露原始评论)
+        audience_hint_section = ""
+        if hint_pack.pacing_hints or hint_pack.risk_flags or hint_pack.clarity_hints:
+            hints = []
+            if hint_pack.pacing_hints:
+                hints.append(f"节奏提示: {len(hint_pack.pacing_hints)}条")
+            if hint_pack.clarity_hints:
+                hints.append(f"清晰度提示: {len(hint_pack.clarity_hints)}条")
+            if hint_pack.risk_flags:
+                hints.append(f"风险标记: {len(hint_pack.risk_flags)}条")
+            if hint_pack.character_heat_changes:
+                hints.append(f"角色热度变化: {len(hint_pack.character_heat_changes)}条")
+            if hint_pack.relationship_interest:
+                hints.append(f"关系线关注: {len(hint_pack.relationship_interest)}条")
+            if hint_pack.prediction_clusters:
+                hints.append(f"读者预测: {len(hint_pack.prediction_clusters)}条")
+            audience_hint_section = f"""
+【读者反馈摘要】
+- {'; '.join(hints)}
 """
         
         # 选择生成模式
         if request.use_scene_mode:
             return await self._generate_with_scenes(
-                project_id, chapter, request, context_pack, reader_feedback_section
+                project_id, chapter, request, context_pack, audience_hint_section
             )
         else:
             return await self._generate_single_pass(
-                project_id, chapter, request, context_pack, reader_feedback_section
+                project_id, chapter, request, context_pack, audience_hint_section
             )
 
     # ==================== Scene 模式 ====================

@@ -19,7 +19,7 @@ from app.repositories.chapter import ChapterRepository
 
 class SignalAggregator:
     """
-    信号聚合器 - Phase B 3窗口设计
+    信号聚合器 - Phase B 3窗口设计 + v2.6 score_v1 评分公式
     
     窗口配置：
     - short: 最近 2~3 章 (窗口大小 3)
@@ -31,6 +31,7 @@ class SignalAggregator:
     2. 计算趋势
     3. 生成 AudienceSignal
     4. 估算读者规模
+    5. score_v1 评分公式
     """
     
     # Phase B 3窗口配置
@@ -39,6 +40,32 @@ class SignalAggregator:
         ("medium", 8),  # 最近 5~10 章
         ("long", 20),   # 最近 10~20 章
     ]
+    
+    # ==================== score_v1 评分公式 ====================
+    # 公式: score = severity_weight * intensity * user_coverage * confidence * reader_tier_mult
+    # 其中:
+    # - severity_weight: risk=4, confusion=2, pacing=1.5, character_heat=1.2, relationship=1.0, prediction=0.8
+    # - intensity: 0.0-1.0 (评论强度)
+    # - user_coverage: min(1.0, unique_users / 5) (用户覆盖率)
+    # - confidence: 0.0-1.0 (分析置信度)
+    # - reader_tier_mult: 读者规模等级乘数 (S=1.5, A=1.2, B=1.0, C=0.8, D=0.5)
+    
+    SEVERITY_WEIGHTS = {
+        "risk": 4.0,
+        "confusion": 2.0,
+        "pacing": 1.5,
+        "character_heat": 1.2,
+        "relationship": 1.0,
+        "prediction": 0.8
+    }
+    
+    READER_TIER_MULT = {
+        "S": 1.5,
+        "A": 1.2,
+        "B": 1.0,
+        "C": 0.8,
+        "D": 0.5
+    }
     
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -387,6 +414,82 @@ class SignalAggregator:
             "recent_signals": pacing_signals,
             "high_confidence_alerts": await self.get_high_confidence_alerts(project_id)
         }
+    
+    # ==================== score_v1 计算方法 ====================
+    
+    def calculate_score_v1(
+        self,
+        signal_type: str,
+        intensity: float,
+        unique_users: int,
+        confidence: float,
+        reader_tier: str = "B"
+    ) -> float:
+        """
+        v2.6 score_v1 评分公式
+        
+        公式: score = severity_weight * intensity * user_coverage * confidence * reader_tier_mult
+        
+        Args:
+            signal_type: 信号类型 (risk/confusion/pacing/character_heat/relationship/prediction)
+            intensity: 评论强度 (0.0-1.0)
+            unique_users: 去重用户数
+            confidence: 分析置信度 (0.0-1.0)
+            reader_tier: 读者规模等级 (S/A/B/C/D)
+        
+        Returns:
+            评分分数 (0.0-10.0)
+        """
+        # 获取 severity weight
+        severity_weight = self.SEVERITY_WEIGHTS.get(signal_type, 1.0)
+        
+        # 计算用户覆盖率 (5个用户封顶)
+        user_coverage = min(1.0, unique_users / 5.0)
+        
+        # 获取读者规模乘数
+        reader_mult = self.READER_TIER_MULT.get(reader_tier, 1.0)
+        
+        # 计算最终分数 (上限10.0)
+        score = severity_weight * intensity * user_coverage * confidence * reader_mult
+        return min(10.0, round(score, 3))
+    
+    def calculate_window_score_v1(
+        self,
+        signal_type: str,
+        avg_intensity: float,
+        unique_users: int,
+        avg_confidence: float,
+        reader_tier: str = "B",
+        signal_count: int = 1
+    ) -> float:
+        """
+        窗口级 score_v1 计算
+        
+        用于 AudienceSignal 的聚合评分
+        
+        Args:
+            signal_type: 信号类型
+            avg_intensity: 平均强度
+            unique_users: 去重用户数
+            avg_confidence: 平均置信度
+            reader_tier: 读者规模等级
+            signal_count: 信号数量 (越多越强)
+        
+        Returns:
+            聚合评分
+        """
+        # 强度加成：评论数量多的信号稍微加权
+        count_bonus = min(1.2, 1.0 + (signal_count - 1) * 0.05)
+        
+        base_score = self.calculate_score_v1(
+            signal_type=signal_type,
+            intensity=avg_intensity,
+            unique_users=unique_users,
+            confidence=avg_confidence,
+            reader_tier=reader_tier
+        )
+        
+        return min(10.0, round(base_score * count_bonus, 3))
 
 
 # 保留旧类名作为别名，保持向后兼容

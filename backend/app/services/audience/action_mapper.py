@@ -103,6 +103,42 @@ class ActionMapperService:
             priority=3
         )
     
+    def _map_relationship_to_action(
+        self,
+        signal: AudienceSignal
+    ) -> ActionSuggestion:
+        """
+        Relationship 信号映射为动作建议 - v2.6 新增
+        
+        关系线/CP类信号，响应窗口为 MEDIUM
+        """
+        return ActionSuggestion(
+            action_type="reband_candidate",  # v2.6 新增：重新评估关系线等级
+            target=f"relationship_{signal.target_id or 'unknown'}",
+            description=f"读者对关系线关注度提升，建议重新评估当前关系线的章节权重分配",
+            response_window=ResponseWindow.MEDIUM,
+            confidence=signal.confidence,
+            priority=3
+        )
+    
+    def _map_prediction_to_action(
+        self,
+        signal: AudienceSignal
+    ) -> ActionSuggestion:
+        """
+        Prediction 信号映射为动作建议 - v2.6 新增
+        
+        读者预测类信号，用于分析读者预期
+        """
+        return ActionSuggestion(
+            action_type="reband_candidate",  # v2.6: 重新评估故事线预测
+            target=f"prediction_{signal.target_id or 'unknown'}",
+            description=f"读者普遍预测情节走向，建议确认是否需要调整预期",
+            response_window=ResponseWindow.SLOW,
+            confidence=signal.confidence,
+            priority=4
+        )
+    
     def _map_risk_to_action(
         self,
         signal: AudienceSignal
@@ -122,7 +158,17 @@ class ActionMapperService:
         )
     
     def map_signal_to_action(self, signal: AudienceSignal) -> ActionSuggestion:
-        """将信号映射为动作建议"""
+        """
+        将信号映射为动作建议 - v2.6 完整支持6类信号
+        
+        支持的信号类型：
+        - confusion: 困惑类 → clarification_backlog
+        - pacing: 节奏类 → pacing_adjustment
+        - character_heat: 角色热度 → character_weight_adjustment
+        - relationship: 关系线/CP类 → reband_candidate (v2.6)
+        - prediction: 预测类 → reband_candidate (v2.6)
+        - risk: 风险类 → urgent_repair
+        """
         signal_type = signal.signal_type
         
         if signal_type == SignalType.CONFUSION.value:
@@ -131,6 +177,10 @@ class ActionMapperService:
             return self._map_pacing_to_action(signal)
         elif signal_type == SignalType.CHARACTER_HEAT.value:
             return self._map_character_heat_to_action(signal)
+        elif signal_type == SignalType.RELATIONSHIP.value:  # v2.6 新增
+            return self._map_relationship_to_action(signal)
+        elif signal_type == SignalType.PREDICTION.value:   # v2.6 新增
+            return self._map_prediction_to_action(signal)
         elif signal_type == SignalType.RISK.value:
             return self._map_risk_to_action(signal)
         else:
@@ -196,13 +246,23 @@ class ActionMapperService:
         band_id: Optional[str] = None
     ) -> AudienceHintPack:
         """
-        生成 Writer 可用的极小提示包
+        生成 Writer 可用的极小提示包 - v2.6 完整6类信号支持
         
         只包含高置信度的提示，且不暴露原始评论
+        
+        包含6类提示：
+        - pacing_hints: 节奏提示
+        - clarity_hints: 清晰度提示
+        - character_heat_changes: 角色热度变化
+        - relationship_interest: 关系线关注 (v2.6)
+        - prediction_clusters: 读者预测聚类 (v2.6)
+        - risk_flags: 风险标记
         """
         pacing_hints = []
         clarity_hints = []
         character_heat_changes = []
+        relationship_interest = []
+        prediction_clusters = []
         risk_flags = []
         
         for signal in signals:
@@ -232,6 +292,20 @@ class ActionMapperService:
                         confidence=signal.confidence
                     ))
             
+            elif signal.signal_type == SignalType.RELATIONSHIP.value:  # v2.6
+                relationship_interest.append({
+                    "pair": [signal.target_id or 0],
+                    "direction": "up",
+                    "evidence": signal.evidence_summary or ""
+                })
+            
+            elif signal.signal_type == SignalType.PREDICTION.value:  # v2.6
+                prediction_clusters.append({
+                    "prediction": signal.evidence_summary or "读者预测",
+                    "count": signal.comment_count or 1,
+                    "confidence": signal.confidence
+                })
+            
             elif signal.signal_type == SignalType.RISK.value:
                 risk_flags.append(RiskFlag(
                     type="reader_feedback_risk",
@@ -244,6 +318,8 @@ class ActionMapperService:
             pacing_hints=pacing_hints,
             clarity_hints=clarity_hints,
             character_heat_changes=character_heat_changes,
+            relationship_interest=relationship_interest,  # v2.6
+            prediction_clusters=prediction_clusters,        # v2.6
             risk_flags=risk_flags
         )
     

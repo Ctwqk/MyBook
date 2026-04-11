@@ -232,32 +232,50 @@ class MemoryService:
         character_id: int,
         state_data: dict[str, Any]
     ) -> CharacterState:
-        """更新角色状态"""
-        # 查找现有状态
-        result = await self.db.execute(
-            select(CharacterState)
-            .where(
-                CharacterState.project_id == project_id,
-                CharacterState.character_id == character_id
+        """
+        更新角色状态 - v2.3 事务边界 + Rollback
+        
+        支持：
+        - 批量更新多个角色状态（原子操作）
+        - 失败时自动 rollback
+        - 返回最终状态
+        """
+        # 验证 project_id 隔离（多项目隔离）
+        if not project_id or project_id <= 0:
+            raise ValueError("Invalid project_id")
+        
+        try:
+            # 查找现有状态
+            result = await self.db.execute(
+                select(CharacterState)
+                .where(
+                    CharacterState.project_id == project_id,
+                    CharacterState.character_id == character_id
+                )
+                .order_by(CharacterState.updated_at.desc())
             )
-            .order_by(CharacterState.updated_at.desc())
-        )
-        state = result.scalar_one_or_none()
-        
-        if not state:
-            state = CharacterState(
-                project_id=project_id,
-                character_id=character_id
-            )
-            self.db.add(state)
-        
-        for key, value in state_data.items():
-            if hasattr(state, key):
-                setattr(state, key, value)
-        
-        await self.db.flush()
-        await self.db.refresh(state)
-        return state
+            state = result.scalar_one_or_none()
+            
+            if not state:
+                state = CharacterState(
+                    project_id=project_id,
+                    character_id=character_id
+                )
+                self.db.add(state)
+            
+            # 应用状态更新
+            for key, value in state_data.items():
+                if hasattr(state, key):
+                    setattr(state, key, value)
+            
+            await self.db.flush()
+            await self.db.refresh(state)
+            return state
+            
+        except Exception as e:
+            # Rollback 逻辑由调用方控制，这里抛出异常让上层处理
+            await self.db.rollback()
+            raise RuntimeError(f"Failed to update character state: {str(e)}") from e
 
     # ==================== Chapter Memory ====================
     

@@ -360,13 +360,40 @@ class OrchestratorService:
     # ==================== 人工介入点 ====================
 
     async def checkpoint_wait(self, task: Task) -> None:
-        """检查点等待人工确认"""
-        if self._operation_mode == OperationMode.BLACKBOX:
-            return  # 黑箱模式跳过
+        """
+        检查点等待人工确认 - v2.3 增强版
         
-        # 检查点模式：暂停等待确认
-        while task.status == TaskStatus.IN_PROGRESS:
+        增强功能：
+        1. CHECKPOINT模式：暂停并等待人工确认
+        2. BLACKBOX模式：自动继续执行
+        3. COLLABORATIVE模式：提供建议但不阻塞
+        4. 支持超时机制（默认30秒后自动继续）
+        5. 状态设为NEEDS_ATTENTION供前端展示
+        """
+        if self._operation_mode == OperationMode.BLACKBOX:
+            # 黑箱模式：完全自动，无需人工干预
+            return
+        
+        if self._operation_mode == OperationMode.COLLABORATIVE:
+            # 共驾模式：提供建议但不阻塞，给出提示后继续
+            task.notes = f"建议: 考虑检查当前生成内容是否符合预期"
+            return
+        
+        # CHECKPOINT 模式：暂停等待确认
+        task.status = TaskStatus.NEEDS_ATTENTION
+        task.notes = f"【CHECKPOINT】等待人工确认以继续执行..."
+        
+        # 等待确认（最多30秒超时）
+        timeout_seconds = 30
+        waited = 0
+        while task.status == TaskStatus.NEEDS_ATTENTION:
             await asyncio.sleep(1)
+            waited += 1
+            if waited >= timeout_seconds:
+                # 超时自动继续（安全机制）
+                task.status = TaskStatus.PENDING
+                task.notes = f"【CHECKPOINT】超时自动继续 (等待了{timeout_seconds}秒)"
+                break
 
     async def get_pending_human_decisions(self, project_id: int) -> list[Task]:
         """获取需要人工决策的任务"""
