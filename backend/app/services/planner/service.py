@@ -547,3 +547,110 @@ class PlannerService:
             return sentences[-2].strip() + "。" if sentences[-2] else ""
         
         return ""
+
+    # ==================== v2.6: Replan Project ====================
+    
+    async def replan_project(
+        self,
+        project_id: int,
+        arc_signals: Optional[dict] = None,
+        pacing_signals: Optional[dict] = None
+    ) -> dict:
+        """
+        重规划项目 - v2.6 新增
+        
+        当以下情况触发时调用：
+        - 连续多章审查失败
+        - Arc完成或重大转折
+        - 人工触发重规划
+        
+        Args:
+            project_id: 项目ID
+            arc_signals: Arc Director信号 (包含confusion_signals, pacing_signals, character_heat_signals等)
+            pacing_signals: Pacing Strategist信号
+        
+        Returns:
+            重规划结果
+        """
+        project = await self.project_repo.get(project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+        
+        # 构建重规划提示
+        replan_context = []
+        
+        if arc_signals:
+            # 分析Arc Director信号
+            confusion = arc_signals.get("confusion_signals", [])
+            character_heat = arc_signals.get("character_heat_signals", [])
+            risk_signals = arc_signals.get("risk_signals", [])
+            trend_views = arc_signals.get("trend_views", [])
+            
+            if confusion:
+                replan_context.append(f"读者困惑点: {len(confusion)}个")
+            if character_heat:
+                replan_context.append(f"角色热度变化: {len(character_heat)}个")
+            if risk_signals:
+                replan_context.append(f"风险信号: {len(risk_signals)}个")
+            if trend_views:
+                # 分析趋势
+                rising = [v for v in trend_views if v.get("trend_type") == "rising"]
+                falling = [v for v in trend_views if v.get("trend_type") == "falling"]
+                replan_context.append(f"上升趋势: {len(rising)}个, 下降趋势: {len(falling)}个")
+        
+        if pacing_signals:
+            # 分析Pacing信号
+            immediate = pacing_signals.get("immediate_signals", [])
+            recent = pacing_signals.get("recent_signals", [])
+            
+            if immediate:
+                replan_context.append(f"即时节奏问题: {len(immediate)}个")
+            if recent:
+                replan_context.append(f"近期节奏反馈: {len(recent)}个")
+        
+        # 获取当前Story Bible
+        story_bible = await self.get_story_bible(project_id)
+        
+        # 构建重规划prompt
+        system_prompt = """你是一个专业的小说策划编辑。你的任务是分析读者反馈信号，
+        对故事计划进行调整优化。"""
+        
+        prompt = f"""基于以下读者反馈信号，对故事计划进行重规划：
+
+当前反馈信号：
+{chr(10).join(replan_context) if replan_context else "无显著信号"}
+
+当前Story Bible摘要：
+- 主题: {getattr(story_bible, 'theme', 'N/A')}
+- 类型: {getattr(story_bible, 'genre', 'N/A')}
+
+请分析并给出重规划建议：
+1. 是否需要调整Arc结构？
+2. 是否需要加强/削弱某些角色线？
+3. 节奏优化建议
+4. 其他调整
+
+请以JSON格式输出建议。
+"""
+        
+        try:
+            response = await self.llm.generate(prompt, system_prompt)
+            content = self._clean_text(response.content)
+            
+            # 尝试解析JSON
+            import json
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                suggestions = json.loads(json_match.group(0))
+            else:
+                suggestions = {"raw_suggestions": content[:1000]}
+        except Exception as e:
+            suggestions = {"error": str(e), "raw_suggestions": ""}
+        
+        return {
+            "project_id": project_id,
+            "replan_signals": replan_context,
+            "suggestions": suggestions,
+            "replan_type": "signal_driven" if (arc_signals or pacing_signals) else "manual"
+        }

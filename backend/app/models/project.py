@@ -75,6 +75,14 @@ class Project(Base):
     arc_envelopes: Mapped[list["ArcEnvelope"]] = relationship(
         "ArcEnvelope", back_populates="project", cascade="all, delete-orphan"
     )
+    # v2.7: 重写尝试记录
+    rewrite_attempts: Mapped[list["ChapterRewriteAttempt"]] = relationship(
+        "ChapterRewriteAttempt", back_populates="project", cascade="all, delete-orphan"
+    )
+    # v2.7: Band 体验计划
+    band_experience_plans: Mapped[list["BandExperiencePlan"]] = relationship(
+        "BandExperiencePlan", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 # Forward reference for type hints
@@ -87,3 +95,5 @@ from app.models.foreshadow_record import ForeshadowRecord
 from app.models.review_note import ReviewNote
 from app.models.publish_task import PublishTask
 from app.models.arc_envelope import ArcEnvelope
+from app.models.chapter_rewrite_attempt import ChapterRewriteAttempt
+from app.models.band_experience_plan import BandExperiencePlan

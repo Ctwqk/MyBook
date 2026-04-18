@@ -60,7 +60,7 @@ class WriterService:
     # Scene continuation 配置
     MAX_SCENE_OUTPUT_TOKENS = 4000  # 单次输出上限
     MIN_SCENE_OUTPUT_TOKENS = 1500  # 最小输出，判断是否被截断
-    MAX_CONTINUATION_PASSES = 3    # 最大续写次数
+    MAX_CONTINUATION_PASSES = 2  # 设计要求≤2    # 最大续写次数
 
     def __init__(
         self,

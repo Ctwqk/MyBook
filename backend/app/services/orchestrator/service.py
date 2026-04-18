@@ -1,10 +1,12 @@
-"""Orchestrator Service - v2.3 多项目隔离 + 任务管理
+"""Orchestrator Service - v2.3 多项目隔离 + 任务管理 + v2.6 增强
 
 支持：
 - 多项目并行任务隔离
 - 任务队列管理
 - 错误恢复流程
 - 黑箱/人工双模式
+- 调用预算控制（300次/小时）
+- 人工介入点3/4/5
 """
 import asyncio
 import json
@@ -17,6 +19,7 @@ from app.repositories.project import ProjectRepository
 from app.repositories.chapter import ChapterRepository
 from app.services.memory.service import MemoryService
 from app.services.planner.service import PlannerService
+from app.services.budget import get_budget_tracker, CallBudgetTracker
 from app.core.exceptions import GenerationError, ReviewError
 from app.services.orchestrator.schemas import (
     Task, TaskStatus, OperationMode, RetryPolicy,
@@ -26,14 +29,15 @@ from app.services.writer.service import WriterService
 
 
 class OrchestratorService:
-    """编排服务 - v2.3"""
+    """编排服务 - v2.3 + v2.6 增强"""
 
     def __init__(
         self,
         db: AsyncSession,
         llm_provider: Optional[LLMProvider] = None,
         operation_mode: OperationMode = OperationMode.CHECKPOINT,
-        retry_policy: Optional[RetryPolicy] = None
+        retry_policy: Optional[RetryPolicy] = None,
+        budget_tracker: Optional[CallBudgetTracker] = None
     ):
         self.db = db
         self.llm = llm_provider
@@ -54,12 +58,18 @@ class OrchestratorService:
         self.operation_mode = operation_mode
         self.retry_policy = retry_policy or RetryPolicy()
         
+        # v2.6: 调用预算追踪器
+        self.budget_tracker = budget_tracker or get_budget_tracker()
+        
         # 任务队列（内存中，生产环境应使用 Redis）
         self._task_queue: dict[int, list[Task]] = {}  # project_id -> tasks
         
         # 运行时模式（可动态切换）
         self._operation_mode = operation_mode
         self._mode_lock = asyncio.Lock()  # 模式切换锁
+        
+        # v2.6: 阶段总结记录（用于介入点5）
+        self._phase_summaries: dict[int, dict] = {}  # project_id -> summary
 
 
     # ==================== 多项目隔离 ====================
@@ -73,6 +83,70 @@ class OrchestratorService:
     def _validate_project_scope(self, project_id: int, resource_project_id: int) -> bool:
         """验证项目范围 - 多项目隔离"""
         return project_id == resource_project_id
+
+    # ==================== 调用预算控制 (v2.6) ====================
+
+    async def _check_budget_and_wait(
+        self,
+        project_id: int,
+        chapter_id: Optional[int] = None,
+        task_type: str = "generate"
+    ) -> None:
+        """
+        检查调用预算并等待（如果需要）- v2.6 新增
+        
+        实现：
+        - 300次/小时全局限制
+        - 单章节5-7次调用预算
+        
+        Args:
+            project_id: 项目ID
+            chapter_id: 章节ID（可选）
+            task_type: 任务类型 (generate/review)
+        """
+        if task_type == "generate" and chapter_id:
+            # 检查章节预算
+            if not self.budget_tracker.can_generate(project_id, chapter_id):
+                # 等待直到有预算
+                status = self.budget_tracker.get_chapter_status(project_id, chapter_id)
+                raise RuntimeError(
+                    f"章节 {chapter_id} 调用预算已用尽 (used={status['calls_used']}, max={status['max_calls']}). "
+                    f"请等待或增加预算。"
+                )
+        else:
+            # 检查全局预算
+            if not self.budget_tracker.global_budget.can_call():
+                remaining = self.budget_tracker.global_budget.get_remaining()
+                raise RuntimeError(
+                    f"全局调用预算已用尽 (remaining={remaining}). "
+                    f"请等待一小时后再试。"
+                )
+    
+    def _record_call(
+        self,
+        project_id: int,
+        chapter_id: Optional[int] = None,
+        task_type: str = "generate"
+    ) -> None:
+        """记录LLM调用 - v2.6 新增"""
+        if task_type == "generate" and chapter_id:
+            self.budget_tracker.record_generate(project_id, chapter_id)
+        else:
+            self.budget_tracker.record_review(project_id, chapter_id or 0)
+    
+    async def get_budget_status(
+        self,
+        project_id: int,
+        chapter_id: Optional[int] = None
+    ) -> dict:
+        """获取预算状态 - v2.6 新增"""
+        result = {
+            "global": self.budget_tracker.get_global_status()
+        }
+        if chapter_id:
+            result["chapter"] = self.budget_tracker.get_chapter_status(project_id, chapter_id)
+        result["project"] = self.budget_tracker.get_project_status(project_id)
+        return result
 
     # ==================== 任务管理 ====================
 
@@ -120,7 +194,21 @@ class OrchestratorService:
             task.status = TaskStatus.IN_PROGRESS
             task.started_at = datetime.now()
             
+            # v2.6: 检查预算
+            await self._check_budget_and_wait(
+                task.project_id,
+                task.chapter_id,
+                task.task_type
+            )
+            
             result = await self._dispatch_task(task)
+            
+            # v2.6: 记录调用
+            self._record_call(
+                task.project_id,
+                task.chapter_id,
+                task.task_type
+            )
             
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now()
@@ -154,7 +242,7 @@ class OrchestratorService:
             return await self._rewrite_chapter(project_id, task.chapter_id)
         
         elif task.task_type == "replan":
-            return await self._replan_project(project_id)
+            return await self._replan_project(project_id)  # v2.6: 介入点3
         
         else:
             raise ValueError(f"Unknown task type: {task.task_type}")
@@ -205,13 +293,16 @@ class OrchestratorService:
         # Planner 生成 Story Bible
         story_bible = await self.planner_service.generate_story_bible(project_id)
         
+        # v2.6 介入点5: 阶段总结后
+        await self._record_phase_summary(project_id, "bootstrap", story_bible)
+        
         return {
             "project_id": project_id,
             "story_bible": story_bible
         }
 
     async def _generate_chapter(self, project_id: int, chapter_id: int) -> WriterOutput:
-        """生成章节 - v2.3 checkpoint 集成"""
+        """生成章节 - v2.3 checkpoint + v2.6 预算控制"""
         # 项目隔离检查
         chapter = await self.chapter_repo.get(chapter_id)
         if not chapter or chapter.project_id != project_id:
@@ -226,7 +317,7 @@ class OrchestratorService:
             status=TaskStatus.IN_PROGRESS
         )
         
-        # CHECKPOINT: 生成前等待人工确认（CHECKPOINT 模式下）
+        # CHECKPOINT: 生成前等待人工确认（介入点1）
         await self.checkpoint_wait(task)
         
         # Writer 生成
@@ -234,7 +325,16 @@ class OrchestratorService:
             project_id, chapter_id, request=None
         )
         
-        return await writer_request
+        result = await writer_request
+        
+        # v2.6 介入点5: 阶段总结后
+        await self._record_phase_summary(
+            project_id, 
+            "generate", 
+            {"chapter_id": chapter_id, "word_count": len(result.draft_blob) // 2}
+        )
+        
+        return result
 
     async def _review_chapter(self, project_id: int, chapter_id: int) -> ReviewVerdictV2:
         """审查章节 - v2.3 checkpoint 集成"""
@@ -252,13 +352,19 @@ class OrchestratorService:
             status=TaskStatus.IN_PROGRESS
         )
         
-        # CHECKPOINT: 审查前等待人工确认（CHECKPOINT 模式下）
+        # CHECKPOINT: 审查前等待人工确认（介入点2）
         await self.checkpoint_wait(task)
         
         # Reviewer 审查
         verdict = await self.reviewer_service.review_chapter(
             project_id, chapter_id
         )
+        
+        # 介入点2扩展: patch/rewrite后再次审查
+        if verdict.verdict in ["patch_required", "rewrite_required"]:
+            # 记录需要人工确认
+            task.notes = f"审查结果: {verdict.verdict}，需要人工确认是否继续"
+            await self.checkpoint_wait(task)
         
         return verdict
 
@@ -292,15 +398,93 @@ class OrchestratorService:
         return result
 
     async def _replan_project(self, project_id: int) -> dict[str, Any]:
-        """重规划项目"""
+        """
+        重规划项目 - v2.6 介入点3
+        
+        当以下情况触发时调用：
+        - 连续多章审查失败
+        - Arc完成或重大转折
+        - 人工触发重规划
+        """
         project = await self.project_repo.get(project_id)
         if not project:
             raise ValueError(f"Project {project_id} not found")
         
-        # Planner 重规划
-        # TODO: 实现重规划逻辑
+        # 介入点3: Replan触发时等待人工确认
+        task = Task(
+            task_id=f"{project_id}_replan_{datetime.now().timestamp()}",
+            project_id=project_id,
+            task_type="replan",
+            status=TaskStatus.NEEDS_ATTENTION,
+            notes="【介入点3】Replan触发：是否确认要重规划项目？"
+        )
+        await self.checkpoint_wait(task)
         
-        return {"project_id": project_id, "action": "replan"}
+        # Planner 重规划
+        from app.services.audience.aggregator import SignalAggregator
+        aggregator = SignalAggregator(self.db)
+        
+        # 获取Arc Director信号
+        arc_signals = await aggregator.get_signals_for_arc_director(project_id)
+        
+        # 获取Pacing Strategist信号
+        pacing_signals = await aggregator.get_signals_for_pacing_strategist(project_id)
+        
+        # 执行重规划
+        replan_result = await self.planner_service.replan_project(
+            project_id,
+            arc_signals=arc_signals,
+            pacing_signals=pacing_signals
+        )
+        
+        # v2.6 介入点5: 阶段总结后
+        await self._record_phase_summary(project_id, "replan", replan_result)
+        
+        return {
+            "project_id": project_id,
+            "action": "replan",
+            "arc_signals": arc_signals,
+            "pacing_signals": pacing_signals,
+            "result": replan_result
+        }
+    
+    async def _record_phase_summary(
+        self,
+        project_id: int,
+        phase: str,
+        result: Any
+    ) -> None:
+        """
+        记录阶段总结 - v2.6 介入点5
+        
+        在每个主要阶段（bootstrap/generate/replan）完成后记录
+        """
+        summary = {
+            "phase": phase,
+            "timestamp": datetime.now().isoformat(),
+            "result_summary": str(result)[:500]  # 截断避免过大
+        }
+        
+        if project_id not in self._phase_summaries:
+            self._phase_summaries[project_id] = {}
+        
+        self._phase_summaries[project_id][phase] = summary
+        
+        # 在CHECKPOINT模式下，提示用户查看阶段总结
+        if self._operation_mode == OperationMode.COLLABORATIVE:
+            # 共驾模式：给出提示
+            task = Task(
+                task_id=f"{project_id}_phase_summary_{datetime.now().timestamp()}",
+                project_id=project_id,
+                task_type="phase_summary",
+                status=TaskStatus.NEEDS_ATTENTION,
+                notes=f"【介入点5】{phase}阶段完成，可查看总结后继续"
+            )
+            await self.checkpoint_wait(task)
+    
+    async def get_phase_summaries(self, project_id: int) -> dict:
+        """获取项目的所有阶段总结 - v2.6"""
+        return self._phase_summaries.get(project_id, {})
 
     # ==================== 运行时模式切换 ====================
 
@@ -417,7 +601,7 @@ class OrchestratorService:
         
         return {"success": False, "error": "Task not found"}
 
-    # ==================== State Updater 事务边界 ====================
+    # ==================== State Updater 事务边界 (v2.6 介入点4) ====================
 
     async def update_state(
         self,
@@ -426,11 +610,12 @@ class OrchestratorService:
         review_verdict: ReviewVerdictV2
     ) -> StateUpdateResult:
         """
-        状态更新 - 带事务边界
+        状态更新 - 带事务边界 + v2.6 介入点4
         
         确保：
         - candidate 失败不影响 canon
         - 事务失败时 rollback
+        - 介入点4: 提交前等待人工确认
         """
         try:
             # 验证项目隔离
@@ -440,6 +625,16 @@ class OrchestratorService:
             applied = []
             rejected = []
             failed = []
+            
+            # 介入点4: State Updater提交前等待确认
+            task = Task(
+                task_id=f"{project_id}_state_update_{datetime.now().timestamp()}",
+                project_id=project_id,
+                task_type="state_update",
+                status=TaskStatus.NEEDS_ATTENTION,
+                notes=f"【介入点4】State Update待确认: {len(writer_output.state_change_candidates)}个candidates"
+            )
+            await self.checkpoint_wait(task)
             
             # 使用显式事务确保原子性
             async with self.db.begin():
@@ -476,12 +671,56 @@ class OrchestratorService:
             
         except Exception as e:
             # 事务失败 - rollback (由 async with 自动处理)
+            # v2.6: 冻结artifact
+            await self._freeze_artifact(project_id, writer_output.chapter_id, str(e))
+            
             return StateUpdateResult(
                 success=False,
                 rollback_performed=True,
                 rollback_reason=str(e),
                 error_message=str(e)
             )
+    
+    async def _freeze_artifact(
+        self,
+        project_id: int,
+        chapter_id: int,
+        reason: str
+    ) -> None:
+        """
+        冻结Artifact - v2.6 新增
+        
+        当State更新失败时，冻结相关artifact以便后续排查
+        """
+        # 获取artifact storage
+        from app.services.artifact.storage import ArtifactStorageManager
+        
+        try:
+            storage = ArtifactStorageManager.get_storage(project_id)
+            
+            # 记录冻结事件到日志/MinIO metadata
+            freeze_record = {
+                "project_id": project_id,
+                "chapter_id": chapter_id,
+                "reason": reason,
+                "frozen_at": datetime.now().isoformat(),
+                "status": "frozen"
+            }
+            
+            # 上传冻结记录
+            import json
+            await storage.upload_artifact(
+                project_id=project_id,
+                artifact_type="freeze_records",
+                filename=f"chapter_{chapter_id}_freeze_{datetime.now().timestamp()}.json",
+                data=json.dumps(freeze_record).encode(),
+                content_type="application/json",
+                metadata={"frozen": "true", "reason": reason}
+            )
+        except Exception as e:
+            # 冻结失败不影响主流程
+            import logging
+            logging.getLogger(__name__).error(f"Failed to freeze artifact: {e}")
 
     def _validate_candidate(self, candidate: dict) -> bool:
         """验证 candidate 是否有效"""

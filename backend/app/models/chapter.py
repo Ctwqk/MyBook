@@ -1,6 +1,7 @@
 """章节模型"""
 import enum
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -40,6 +41,9 @@ class Chapter(Base):
     )
     word_count: Mapped[int] = mapped_column(Integer, default=0)         # 字数
     
+    # v2.7: 体验计划 JSON
+    experience_plan_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -67,6 +71,10 @@ class Chapter(Base):
     publish_tasks: Mapped[list["PublishTask"]] = relationship(
         "PublishTask", back_populates="chapter", cascade="all, delete-orphan"
     )
+    # v2.7: 重写尝试记录
+    rewrite_attempts: Mapped[list["ChapterRewriteAttempt"]] = relationship(
+        "ChapterRewriteAttempt", back_populates="chapter", cascade="all, delete-orphan"
+    )
 
 
 from app.models.project import Project
@@ -75,3 +83,4 @@ from app.models.chapter_memory import ChapterMemory
 from app.models.review_note import ReviewNote
 from app.models.foreshadow_record import ForeshadowRecord
 from app.models.publish_task import PublishTask
+from app.models.chapter_rewrite_attempt import ChapterRewriteAttempt

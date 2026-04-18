@@ -10,6 +10,15 @@ from app.models.foreshadow_record import ForeshadowRecord
 from app.models.review_note import ReviewNote
 from app.models.publish_task import PublishTask
 from app.models.story_bible import StoryBible
+from app.models.arc_envelope import (
+    ArcEnvelope,
+    ArcStructureDraft,
+    ArcEnvelopeAnalysis,
+    ProvisionalPromotionRecord,
+)
+# v2.7 新增
+from app.models.chapter_rewrite_attempt import ChapterRewriteAttempt
+from app.models.band_experience_plan import BandExperiencePlan
 
 __all__ = [
     "Project",
@@ -23,4 +32,11 @@ __all__ = [
     "ReviewNote",
     "PublishTask",
     "StoryBible",
+    "ArcEnvelope",
+    "ArcStructureDraft",
+    "ArcEnvelopeAnalysis",
+    "ProvisionalPromotionRecord",
+    # v2.7
+    "ChapterRewriteAttempt",
+    "BandExperiencePlan",
 ]

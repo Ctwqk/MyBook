@@ -1,8 +1,9 @@
 """审查记录模型"""
 import enum
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func, Enum
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Boolean, func, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -48,6 +49,15 @@ class ReviewNote(Base):
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)     # 问题描述
     fix_suggestion: Mapped[str] = mapped_column(Text, nullable=True)    # 修复建议
+    
+    # v2.7: 强制接受标记
+    forced_accept_applied: Mapped[bool] = mapped_column(default=False)
+    
+    # v2.7: 覆盖原因
+    override_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # v2.7: 重写尝试次数
+    rewrite_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

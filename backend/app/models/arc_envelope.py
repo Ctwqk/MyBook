@@ -149,6 +149,12 @@ class ArcStructureDraft(Base):
     # LLM 生成的结构化内容
     raw_structure: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # v2.7: 读者承诺 JSON
+    reader_promise_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # v2.7: Arc 回报图 JSON
+    arc_payoff_map_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

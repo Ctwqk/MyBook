@@ -291,6 +291,21 @@ async def review_chapter(
         "verdict_reason": result.verdict_reason,
         "issues": issues,
         "scores": result.scores if isinstance(result.scores, dict) else {},
+        # v2.7 新增字段
+        "recommended_action": getattr(result, 'recommended_action', None),
+        "review_summary": getattr(result, 'review_summary', ''),
+        "experience_scores": getattr(result, 'experience_scores', {}),
+        "planned_reward_tags": [
+            tag.value if hasattr(tag, 'value') else str(tag) 
+            for tag in getattr(result, 'planned_reward_tags', [])
+        ],
+        "delivered_reward_tags": [
+            tag.value if hasattr(tag, 'value') else str(tag) 
+            for tag in getattr(result, 'delivered_reward_tags', [])
+        ],
+        "forced_accept_applied": getattr(result, 'forced_accept_applied', False),
+        "override_reason": getattr(result, 'override_reason', None),
+        "repair_instruction": getattr(result, 'repair_instruction', None),
         "review_notes": []
     }
 

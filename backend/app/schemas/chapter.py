@@ -1,6 +1,6 @@
 """章节相关 Pydantic schemas"""
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,7 @@ class ChapterResponse(BaseModel):
     volume_id: Optional[int] = None
     status: ChapterStatus
     word_count: int = 0
+    experience_plan_json: Optional[dict[str, Any]] = None  # v2.7: 章节体验计划
     created_at: datetime
     updated_at: datetime
 

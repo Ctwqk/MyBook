@@ -21,6 +21,7 @@ class OperationMode(str, Enum):
     BLACKBOX = "blackbox"       # 完全黑箱，无需人工
     CHECKPOINT = "checkpoint"   # 检查点模式，关键节点等待确认
     COLLABORATIVE = "collaborative"  # 共驾编辑模式
+    COPAYILOT = "copilot"      # 共驾模式，v2.7 新增
 
 
 class TaskStatus(str, Enum):
@@ -71,7 +72,13 @@ class RetryPolicy(BaseModel):
 # ========================================
 
 class ScenePlan(BaseModel):
-    """Scene 计划"""
+    """Scene 计划 - v2.7 扩展
+    
+    新增字段：
+    - reward_beat_tag: 奖励节拍标签
+    - immersion_anchor: 沉浸锚点
+    - progress_marker: 进度标记
+    """
     scene_no: int
     scene_objective: str
     scene_time_point: Optional[str] = None
@@ -79,6 +86,11 @@ class ScenePlan(BaseModel):
     involved_entities: list[str] = []
     must_progress_points: list[str] = []
     micro_hook: Optional[str] = None
+    
+    # v2.7 新增字段
+    reward_beat_tag: Optional[str] = None  # 奖励节拍标签
+    immersion_anchor: Optional[str] = None  # 沉浸锚点描述
+    progress_marker: Optional[str] = None  # 进度标记
 
 
 class SceneOutput(BaseModel):
