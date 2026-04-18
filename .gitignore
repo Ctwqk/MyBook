@@ -1,1 +1,32 @@
 node_modules/
+dist/
+build/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Python cache and virtualenvs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local runtime and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and credentials
+**/credentials/
+**/secrets/
+**/client_secret*.json
+*.pem
+*.key
