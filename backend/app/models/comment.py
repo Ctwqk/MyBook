@@ -10,9 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Float, Boolean
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
+from app.db.session import Base
 
 
 class SignalType(str, Enum):

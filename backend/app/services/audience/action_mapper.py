@@ -353,6 +353,11 @@ class ActionMapperService:
         hint_pack.chapter_id = chapter_id
         hint_pack.band_id = band_id
         hint_pack.generated_at = datetime.now()
+
+        # Empty hint packs do not carry state. Avoid writing one empty row per
+        # generated chapter during long-form runs with no audience signals.
+        if not signals:
+            return hint_pack
         
         # 存储
         self.db.add(hint_pack)

@@ -71,6 +71,9 @@ class GenerateChapterRequest(BaseModel):
     outline: Optional[str] = None  # 可选自定义大纲
     context_pack_id: Optional[int] = None  # 上下文包ID
     style_hints: Optional[str] = None  # 风格提示
+    use_scene_mode: bool = False
+    scene_count: int = Field(default=2, ge=1, le=8)
+    target_word_count: int = Field(default=3000, ge=500, le=10000)
 
 
 class ContinueChapterRequest(BaseModel):

@@ -2,6 +2,7 @@
 import pytest
 from app.services.writer.service import WriterService
 from app.schemas.chapter import GenerateChapterRequest
+from app.services.orchestrator.schemas import WriterOutput
 
 
 class TestWriterService:
@@ -32,10 +33,10 @@ class TestWriterService:
             request=request
         )
         
-        assert result is not None
-        assert "chapter" in result
-        assert "text" in result
-        assert len(result["text"]) > 0
+        assert isinstance(result, WriterOutput)
+        assert result.chapter_id == chapter.id
+        assert result.draft_blob
+        assert result.generation_meta["mode"] == "single_pass"
     
     @pytest.mark.asyncio
     async def test_continue_chapter(self, db_session, test_project):

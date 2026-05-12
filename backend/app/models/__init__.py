@@ -19,6 +19,15 @@ from app.models.arc_envelope import (
 # v2.7 新增
 from app.models.chapter_rewrite_attempt import ChapterRewriteAttempt
 from app.models.band_experience_plan import BandExperiencePlan
+from app.models.comment import (
+    AudienceHintPack,
+    AudienceSignal,
+    AudienceTrend,
+    CommentSignal,
+    CommentSignalCandidate,
+    RawComment,
+    SignalWindowAggregate,
+)
 
 __all__ = [
     "Project",
@@ -39,4 +48,11 @@ __all__ = [
     # v2.7
     "ChapterRewriteAttempt",
     "BandExperiencePlan",
+    "AudienceHintPack",
+    "AudienceSignal",
+    "AudienceTrend",
+    "CommentSignal",
+    "CommentSignalCandidate",
+    "RawComment",
+    "SignalWindowAggregate",
 ]

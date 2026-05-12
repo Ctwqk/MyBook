@@ -5,7 +5,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.session import engine, Base
-from app.api.routes import projects, chapters, memory, publish, platform, arc_envelopes, orchestrator, audience
+from app.api.routes import (
+    arc_envelopes,
+    audience,
+    chapters,
+    memory,
+    orchestrator,
+    performance,
+    platform,
+    projects,
+    publish,
+)
 
 
 @asynccontextmanager
@@ -48,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(arc_envelopes.router)
     app.include_router(orchestrator.router)
     app.include_router(audience.router)
+    app.include_router(performance.router)
     
     # 健康检查
     @app.get("/health")

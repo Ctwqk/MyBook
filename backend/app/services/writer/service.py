@@ -9,9 +9,11 @@
 import asyncio
 import json
 import re
+from contextlib import nullcontext
 from typing import Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.models.comment  # noqa: F401 - register AudienceHintPack tables for create_all().
 from app.llm.base import LLMProvider
 from app.llm.mock import MockLLMProvider
 from app.models.chapter import Chapter, ChapterStatus
@@ -67,12 +69,14 @@ class WriterService:
         db: AsyncSession,
         llm_provider: Optional[LLMProvider] = None,
         operation_mode: OperationMode = OperationMode.CHECKPOINT,
-        retry_policy: Optional[RetryPolicy] = None
+        retry_policy: Optional[RetryPolicy] = None,
+        stage_profiler: Any | None = None,
     ):
         self.db = db
         self.llm = llm_provider or MockLLMProvider()
         self.chapter_repo = ChapterRepository(db)
         self.memory_service = MemoryService(db)
+        self.stage_profiler = stage_profiler
         
         # v2.3 配置
         self.operation_mode = operation_mode
@@ -84,7 +88,7 @@ class WriterService:
         self,
         project_id: int,
         chapter_id: int,
-        request: WriterGenerationRequest
+        request: WriterGenerationRequest | GenerateChapterRequest | None
     ) -> WriterOutput:
         """
         生成章节 - v2.3 主入口
@@ -93,27 +97,31 @@ class WriterService:
         - scene 模式：分 scene 生成 + stitch
         - 单章模式：直接生成
         """
+        request = self._normalize_generation_request(chapter_id, request)
+
         # 获取章节信息
         chapter = await self.chapter_repo.get(chapter_id)
         if not chapter:
             raise ValueError(f"Chapter {chapter_id} not found")
         
         # 获取上下文
-        context_pack = await self.memory_service.build_context_pack(
-            project_id,
-            ContextPackRequest(
-                chapter_id=chapter_id,
-                include_story_bible=True,
-                include_character_states=True,
-                include_recent_chapters=3,
-                include_foreshadows=True
+        with self._stage("memory.build_context_pack", chapter_no=chapter.chapter_no):
+            context_pack = await self.memory_service.build_context_pack(
+                project_id,
+                ContextPackRequest(
+                    chapter_id=chapter_id,
+                    include_story_bible=True,
+                    include_character_states=True,
+                    include_recent_chapters=3,
+                    include_foreshadows=True
+                )
             )
-        )
         
         # 获取 AudienceHintPack (v2.6 Phase C) - 替代 ReaderFeedbackView
         from app.services.audience.action_mapper import ActionMapperService
         action_mapper = ActionMapperService(self.db)
-        hint_pack = await action_mapper.create_hint_pack(project_id, chapter_id)
+        with self._stage("audience.create_hint_pack", chapter_no=chapter.chapter_no):
+            hint_pack = await action_mapper.create_hint_pack(project_id, chapter_id)
 
         # 构建 Audience Hint Section (不暴露原始评论)
         audience_hint_section = ""
@@ -138,13 +146,15 @@ class WriterService:
         
         # 选择生成模式
         if request.use_scene_mode:
-            return await self._generate_with_scenes(
-                project_id, chapter, request, context_pack, audience_hint_section
-            )
+            with self._stage("writer.generate_with_scenes", chapter_no=chapter.chapter_no):
+                return await self._generate_with_scenes(
+                    project_id, chapter, request, context_pack, audience_hint_section
+                )
         else:
-            return await self._generate_single_pass(
-                project_id, chapter, request, context_pack, audience_hint_section
-            )
+            with self._stage("writer.generate_single_pass", chapter_no=chapter.chapter_no):
+                return await self._generate_single_pass(
+                    project_id, chapter, request, context_pack, audience_hint_section
+                )
 
     # ==================== Scene 模式 ====================
 
@@ -335,7 +345,7 @@ class WriterService:
             return False
         
         last_char = text[-1]
-        incomplete_endings = ['，', '、', '：', ';', ':', '-', '(', '（', '"', '"', ''', ''']
+        incomplete_endings = ['，', '、', '：', ';', ':', '-', '(', '（', '"', "'", '“', '‘']
         
         # 以不完整标点结尾
         if last_char in incomplete_endings:
@@ -345,7 +355,7 @@ class WriterService:
         if last_char.isalpha() or last_char.isdigit():
             # 检查最后50个字符是否看起来像被截断
             last_segment = text[-50:].strip()
-            if last_segment and not any(last_segment.endswith(end) for end in ['。', '！', '？', '..."', '"', ''', ''', '。', '！', '？']):
+            if last_segment and not any(last_segment.endswith(end) for end in ['。', '！', '？', '..."', '"', "'", '”', '’']):
                 # 检查是否有动词但没有结尾
                 if any(word in last_segment.lower() for word in ['and', 'was', 'were', 'is', 'are', 'be', 'to', 'that', 'he', 'she', 'it', 'they']):
                     return True
@@ -481,18 +491,22 @@ class WriterService:
             reader_feedback=reader_feedback_section
         )
         
-        response = await self._call_llm_with_retry(prompt, system_prompt)
-        text = self._clean_text(response.content)
+        with self._stage("writer.llm_draft", chapter_no=chapter.chapter_no):
+            response = await self._call_llm_with_retry(prompt, system_prompt)
+        with self._stage("writer.text_cleaning", chapter_no=chapter.chapter_no):
+            text = self._clean_text(response.content)
         
         # Structured Extraction
-        extracted = await self._extract_structured_info(text, chapter.chapter_no)
+        with self._stage("writer.structured_extraction", chapter_no=chapter.chapter_no):
+            extracted = await self._extract_structured_info(text, chapter.chapter_no)
         
         # 更新章节
-        word_count = len(text) // 2
-        chapter.text = text
-        chapter.word_count = word_count
-        chapter.status = ChapterStatus.DRAFT
-        await self.db.flush()
+        with self._stage("writer.chapter_persistence", chapter_no=chapter.chapter_no):
+            word_count = len(text) // 2
+            chapter.text = text
+            chapter.word_count = word_count
+            chapter.status = ChapterStatus.DRAFT
+            await self.db.flush()
         
         return WriterOutput(
             project_id=project_id,
@@ -506,6 +520,17 @@ class WriterService:
         )
 
     # ==================== 工具方法 ====================
+
+    def _stage(
+        self,
+        name: str,
+        *,
+        chapter_no: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ):
+        if self.stage_profiler is None:
+            return nullcontext()
+        return self.stage_profiler.stage(name, chapter_no=chapter_no, metadata=metadata)
 
     async def _call_llm_with_retry(
         self,
@@ -661,7 +686,7 @@ class WriterService:
                 chapter_id=chapter_id,
                 outline=request.outline,
                 use_scene_mode=False,
-                target_word_count=request.target_word_count or 3000,
+                target_word_count=getattr(request, "target_word_count", 3000) or 3000,
                 style_hints=request.style_hints
             )
         )
@@ -674,6 +699,25 @@ class WriterService:
             "word_count": len(output.draft_blob) // 2,
             "summary": output.chapter_summary
         }
+
+    @staticmethod
+    def _normalize_generation_request(
+        chapter_id: int,
+        request: WriterGenerationRequest | GenerateChapterRequest | None,
+    ) -> WriterGenerationRequest:
+        """Accept legacy API payloads and internal calls through one request type."""
+        if isinstance(request, WriterGenerationRequest):
+            return request
+        if request is None:
+            return WriterGenerationRequest(chapter_id=chapter_id)
+        return WriterGenerationRequest(
+            chapter_id=chapter_id,
+            outline=request.outline,
+            use_scene_mode=getattr(request, "use_scene_mode", False),
+            scene_count=getattr(request, "scene_count", 2) or 2,
+            target_word_count=getattr(request, "target_word_count", 3000) or 3000,
+            style_hints=request.style_hints,
+        )
 
     async def continue_chapter(
         self,

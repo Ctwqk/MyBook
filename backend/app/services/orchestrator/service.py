@@ -23,7 +23,7 @@ from app.services.budget import get_budget_tracker, CallBudgetTracker
 from app.core.exceptions import GenerationError, ReviewError
 from app.services.orchestrator.schemas import (
     Task, TaskStatus, OperationMode, RetryPolicy,
-    WriterOutput, ReviewVerdictV2, StateUpdateResult
+    WriterGenerationRequest, WriterOutput, ReviewVerdictV2, StateUpdateResult
 )
 from app.services.writer.service import WriterService
 
@@ -321,11 +321,16 @@ class OrchestratorService:
         await self.checkpoint_wait(task)
         
         # Writer 生成
-        writer_request = self.writer_service.generate_chapter(
-            project_id, chapter_id, request=None
+        writer_request = WriterGenerationRequest(
+            chapter_id=chapter_id,
+            outline=chapter.outline,
+            use_scene_mode=False,
+            scene_count=2,
+            target_word_count=3000,
         )
-        
-        result = await writer_request
+        result = await self.writer_service.generate_chapter(
+            project_id, chapter_id, request=writer_request
+        )
         
         # v2.6 介入点5: 阶段总结后
         await self._record_phase_summary(
