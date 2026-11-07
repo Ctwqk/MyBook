@@ -8,6 +8,7 @@ from app.db.session import engine, Base
 from app.api.routes import (
     arc_envelopes,
     audience,
+    book_state,
     chapters,
     memory,
     orchestrator,
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(orchestrator.router)
     app.include_router(audience.router)
     app.include_router(performance.router)
+    app.include_router(book_state.router)
     
     # 健康检查
     @app.get("/health")

@@ -83,6 +83,14 @@ class Project(Base):
     band_experience_plans: Mapped[list["BandExperiencePlan"]] = relationship(
         "BandExperiencePlan", back_populates="project", cascade="all, delete-orphan"
     )
+    # BookState: 世界节点 (Phase 1)
+    world_nodes: Mapped[list["WorldNode"]] = relationship(
+        "WorldNode", back_populates="project", cascade="all, delete-orphan"
+    )
+    # BookState: 增量账本 (Phase 1)
+    graph_deltas: Mapped[list["GraphDelta"]] = relationship(
+        "GraphDelta", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 # Forward reference for type hints
